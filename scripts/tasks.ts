@@ -1,9 +1,14 @@
 import { $ } from 'bun';
 import fs from 'fs-extra';
-import { join, normalize } from 'path';
+import { delimiter, dirname, join, normalize } from 'path';
 import sharp from 'sharp';
 
 import * as config from './config';
+
+const bunDir = dirname(process.execPath);
+if (!process.env.PATH?.includes(bunDir)) {
+	process.env.PATH = `${bunDir}${delimiter}${process.env.PATH || ''}`;
+}
 
 export async function clean() {
 	await fs.emptyDir(config.build);

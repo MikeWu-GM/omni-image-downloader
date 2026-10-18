@@ -1,9 +1,17 @@
 // @ts-check
 import html, { useSignal } from '../html.js';
 
-import { removeSpecialCharacters, setToInvertedCheckboxValue } from '../utils.js';
+import { removeSpecialCharacters, setToCheckboxValue, setToInvertedCheckboxValue } from '../utils.js';
 import * as actions from './actions.js';
-import { folderName, isFolderCustomized, newFileName, selectedImages, showDownloadConfirmation } from './data.js';
+import { Checkbox } from './Checkbox.js';
+import {
+	currentSelectedImages,
+	folderName,
+	isFolderCustomized,
+	newFileName,
+	saveSourceUrl,
+	showDownloadConfirmation,
+} from './data.js';
 import { DownloadButton } from './DownloadButton.js';
 import { DownloadConfirmation } from './DownloadConfirmation.js';
 import { useRunAfterUpdate } from './useRunAfterUpdate.js';
@@ -14,7 +22,7 @@ export function Footer(/** @type {Object} */ props) {
 	const downloadConfirmationIsShown = useSignal(false);
 
 	function maybeDownloadImages() {
-		if (showDownloadConfirmation.value && selectedImages.value.length > 1) {
+		if (showDownloadConfirmation.value && currentSelectedImages.value.length > 1) {
 			downloadConfirmationIsShown.value = true;
 		} else {
 			downloadImages();
@@ -23,7 +31,7 @@ export function Footer(/** @type {Object} */ props) {
 
 	async function downloadImages() {
 		downloadIsInProgress.value = true;
-		await actions.downloadImages(selectedImages.value);
+		await actions.downloadImages(currentSelectedImages.value);
 		downloadIsInProgress.value = false;
 	}
 
@@ -35,7 +43,7 @@ export function Footer(/** @type {Object} */ props) {
 				downloadConfirmationIsShown.value
 					? html`
 							<${DownloadConfirmation}
-								numberOfImages=${selectedImages.value.length}
+								numberOfImages=${currentSelectedImages.value.length}
 								onCheckboxChange=${setToInvertedCheckboxValue(showDownloadConfirmation)}
 								onClose=${() => (downloadConfirmationIsShown.value = false)}
 								onConfirm=${downloadImages}
@@ -88,10 +96,20 @@ export function Footer(/** @type {Object} */ props) {
 
 								<${DownloadButton}
 									class="col-span-1"
-									disabled=${selectedImages.value.length === 0}
+									disabled=${currentSelectedImages.value.length === 0}
 									loading=${downloadIsInProgress.value}
 									onClick=${maybeDownloadImages}
 								/>
+							</div>
+
+							<div class="mt-1 flex items-center text-xs text-slate-600 dark:text-slate-400">
+								<${Checkbox}
+									checked=${saveSourceUrl}
+									onChange=${setToCheckboxValue(saveSourceUrl)}
+									title="Save source webpage HTML shortcut into the download folder"
+								>
+									Save source URL (source.html)
+								<//>
 							</div>
 						`
 			}

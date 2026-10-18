@@ -106,6 +106,31 @@ describe('serviceWorker filename suggestions', () => {
 		await startBatch(['https://example.com/broken.jpg']);
 		expect(chrome.downloads.onDeterminingFilename.listeners.size).toBe(0);
 	});
+
+	it('downloads source_url_file and suggests its filename without numbering', async () => {
+		const sourceFile = {
+			url: 'data:text/html;charset=utf-8,redirect',
+			filename: 'my_folder/source.html',
+		};
+		const done = startBatch(['https://example.com/a.jpg'], {
+			folder_name: 'my_folder',
+			new_file_name: 'pic',
+			source_url_file: sourceFile,
+		});
+
+		const [imgId, sourceId] = downloadIds.slice(-2);
+
+		const imgSuggest = mock();
+		filenameListener()({ id: imgId, filename: 'a.jpg' }, imgSuggest);
+		expect(imgSuggest.mock.calls).toEqual([[{ filename: 'my_folder/pic1.jpg', conflictAction: 'uniquify' }]]);
+
+		const sourceSuggest = mock();
+		filenameListener()({ id: sourceId, filename: 'download.html' }, sourceSuggest);
+		expect(sourceSuggest.mock.calls).toEqual([[{ filename: 'my_folder/source.html', conflictAction: 'uniquify' }]]);
+
+		await done;
+		expect(chrome.downloads.onDeterminingFilename.listeners.size).toBe(0);
+	});
 });
 
 describe('Firefox', () => {
@@ -167,4 +192,3 @@ describe('serviceWorker tab-scoped sidePanel', () => {
 		expect(chrome.sidePanel.open).toHaveBeenCalledWith({ tabId: 101 });
 	});
 });
-

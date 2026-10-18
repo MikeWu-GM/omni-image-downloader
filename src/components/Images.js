@@ -6,6 +6,7 @@ import * as actions from './actions.js';
 import { Checkbox } from './Checkbox.js';
 import {
 	columns,
+	currentSelectedImages,
 	displayedImages,
 	filteredOutImages,
 	imageErrored,
@@ -45,7 +46,8 @@ import { useScrollToEnd } from './useScrollToEnd.js';
  */
 
 export function Images(/** @type {ImagesProps} */ { class: className, style, ...props }) {
-	const allImagesFromCurrentTabAreSelected = displayedImages.value.every(isIncludedIn(selectedImages.value));
+	const allImagesFromCurrentTabAreSelected =
+		displayedImages.value.length > 0 && displayedImages.value.every(isIncludedIn(selectedImages.value));
 
 	const themeTooltip = {
 		system: 'Using your system theme',
@@ -103,8 +105,8 @@ export function Images(/** @type {ImagesProps} */ { class: className, style, ...
 
 			<${Checkbox}
 				class="flex items-center gap-1 rounded-full border border-slate-300 bg-slate-50 p-1 text-xs text-nowrap text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-				checked=${selectedImages.value.length > 0 && allImagesFromCurrentTabAreSelected}
-				indeterminate=${selectedImages.value.length > 0 && !allImagesFromCurrentTabAreSelected}
+				checked=${allImagesFromCurrentTabAreSelected}
+				indeterminate=${currentSelectedImages.value.length > 0 && !allImagesFromCurrentTabAreSelected}
 				disabled=${displayedImages.value.length === 0}
 				title="Click to select or unselect all displayed images"
 				onChange=${(/** @type {Event} */ e) => {
@@ -114,7 +116,7 @@ export function Images(/** @type {ImagesProps} */ { class: className, style, ...
 						: selectedImages.value.filter(isNotIncludedIn(displayedImages.value));
 				}}
 			>
-				${selectedImages.value.length} selected
+				${currentSelectedImages.value.length} selected
 			<//>
 
 			<div class="mt-px ml-auto flex items-center gap-1.5 text-xs">

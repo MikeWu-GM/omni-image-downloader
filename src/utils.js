@@ -70,3 +70,23 @@ export const sanitizeFolderName = (rawTitle = '', fallbackHost = '') => {
 	return 'images';
 };
 
+/** @type {(url: string, title?: string) => string} */
+export const generateSourceHtml = (url, title = '') => {
+	const safeTitle = title || url;
+	const safeUrl = url.replace(/"/g, '&quot;');
+	return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="0; url=${safeUrl}">
+  <title>${safeTitle}</title>
+</head>
+<body style="font-family: system-ui, -apple-system, sans-serif; padding: 2rem; max-width: 600px; margin: 0 auto; line-height: 1.5;">
+  <h2>${safeTitle}</h2>
+  <p>Redirecting to source webpage...</p>
+  <p><a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeUrl}</a></p>
+  <hr style="border: none; border-top: 1px solid #eee; margin: 1.5rem 0;" />
+  <p style="color: #666; font-size: 0.85rem;">Downloaded via Image Downloader</p>
+</body>
+</html>`;
+};

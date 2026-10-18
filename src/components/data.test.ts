@@ -6,6 +6,7 @@ mockDOM();
 import {
 	allImages,
 	columns,
+	currentSelectedImages,
 	filterMaxHeight,
 	filterMaxHeightEnabled,
 	filterMaxWidth,
@@ -31,6 +32,7 @@ import {
 	setLockedTabId,
 	showAdvancedFilters,
 	showDownloadConfirmation,
+	tab,
 } from './data.js';
 
 let localStorageData: Record<string, string>;
@@ -300,7 +302,9 @@ describe('loadImagesFromActiveTab', () => {
 	it('targets the tabId from the URL query parameter when present', async () => {
 		const chrome = (global as any).chrome;
 		window.location.search = '?tabId=42';
-		chrome.tabs.get = mock((tabId: number, callback: any) => callback({ id: tabId, url: 'https://example.com/locked' }));
+		chrome.tabs.get = mock((tabId: number, callback: any) =>
+			callback({ id: tabId, url: 'https://example.com/locked' })
+		);
 		chrome.tabs.query = mock((_query: any, callback: any) => callback([{ id: 7, url: 'https://example.com/other' }]));
 		chrome.scripting = {
 			executeScript: mock(async () => [
@@ -344,7 +348,6 @@ describe('loadImagesFromActiveTab', () => {
 	});
 });
 
-
 describe('reloadImagesWhenPageLoads', () => {
 	it('ignores tab switching and updates from other tabs when tabId is locked in URL', () => {
 		const chrome = (global as any).chrome;
@@ -363,5 +366,48 @@ describe('reloadImagesWhenPageLoads', () => {
 		expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
 
 		window.location.search = '';
+	});
+});
+
+describe('currentSelectedImages', () => {
+	it('only includes selected images that match the active tab', () => {
+		allImages.value = ['https://example.com/1.png', 'https://example.com/2.png', 'https://example.com/3.png'];
+		filterUrl.value = '1.png';
+		selectedImages.value = ['https://example.com/1.png', 'https://example.com/2.png'];
+
+		tab.value = 'matching';
+		expect(currentSelectedImages.value).toEqual(['https://example.com/1.png']);
+
+		tab.value = 'filtered_out';
+		expect(currentSelectedImages.value).toEqual(['https://example.com/2.png']);
+	});
+
+	it('respects dimension filters so filtered-out images are not selected on matching tab', () => {
+		const cache = document.createElement('div');
+		const imgSmall = document.createElement('img');
+		imgSmall.src = 'https://example.com/small.png';
+		Object.defineProperty(imgSmall, 'naturalWidth', { value: 100 });
+		Object.defineProperty(imgSmall, 'naturalHeight', { value: 100 });
+
+		const imgLarge = document.createElement('img');
+		imgLarge.src = 'https://example.com/large.png';
+		Object.defineProperty(imgLarge, 'naturalWidth', { value: 800 });
+		Object.defineProperty(imgLarge, 'naturalHeight', { value: 800 });
+
+		cache.append(imgSmall, imgLarge);
+		imagesCache.value = cache;
+
+		allImages.value = ['https://example.com/small.png', 'https://example.com/large.png'];
+		selectedImages.value = ['https://example.com/small.png', 'https://example.com/large.png'];
+
+		filterMinWidthEnabled.value = true;
+		filterMinWidth.value = 500;
+
+		tab.value = 'matching';
+		expect(matchingImages.value).toEqual(['https://example.com/large.png']);
+		expect(currentSelectedImages.value).toEqual(['https://example.com/large.png']);
+
+		tab.value = 'filtered_out';
+		expect(currentSelectedImages.value).toEqual(['https://example.com/small.png']);
 	});
 });

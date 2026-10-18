@@ -1,8 +1,18 @@
 // @ts-check
-import { folderName, newFileName } from './data.js';
+import { generateSourceHtml } from '../utils.js';
+import { folderName, newFileName, pageTitle, pageUrl, saveSourceUrl } from './data.js';
 
 export const downloadImages = (/** @type {string[]} */ imagesToDownload) =>
 	new Promise((resolve) => {
+		const sourceUrlFile =
+			saveSourceUrl.value && pageUrl.value
+				? {
+						url:
+							'data:text/html;charset=utf-8,' + encodeURIComponent(generateSourceHtml(pageUrl.value, pageTitle.value)),
+						filename: (folderName.value ? `${folderName.value}/` : '') + 'source.html',
+					}
+				: null;
+
 		chrome.runtime.sendMessage(
 			{
 				type: 'downloadImages',
@@ -10,6 +20,7 @@ export const downloadImages = (/** @type {string[]} */ imagesToDownload) =>
 				options: {
 					folder_name: folderName.value,
 					new_file_name: newFileName.value,
+					source_url_file: sourceUrlFile,
 				},
 			},
 			resolve

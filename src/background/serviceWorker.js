@@ -65,7 +65,9 @@ if (chrome.sidePanel) {
 /** @typedef {{
  *   imagesToDownload: string[],
  *   options: any,
- *   indices: Map<number, number> // downloadId → original index
+ *   indices: Map<number, number>, // downloadId → original index
+ *   sourceDownloadId?: number,
+ *   sourceFilename?: string
  * }} Task */
 
 /** @type {Map<number, Task>} */
@@ -142,6 +144,30 @@ async function downloadImages(/** @type {Task} */ task) {
 			});
 		});
 
+		if (task.options?.source_url_file) {
+			const { url, filename } = task.options.source_url_file;
+			promises.push(
+				new Promise((/** @type {(response?: any) => void} */ resolve) => {
+					/** @type {chrome.downloads.DownloadOptions} */
+					const downloadOptions = canSuggestFilename()
+						? { url }
+						: { url, filename: normalizeSlashes(filename), conflictAction: 'uniquify' };
+					chrome.downloads.download(downloadOptions, (downloadId) => {
+						if (downloadId != null) {
+							task.sourceDownloadId = downloadId;
+							task.sourceFilename = normalizeSlashes(filename);
+							tasksByDownloadId.set(downloadId, task);
+						} else {
+							if (chrome.runtime.lastError) {
+								console.error(`${filename}:`, chrome.runtime.lastError.message);
+							}
+						}
+						resolve();
+					});
+				})
+			);
+		}
+
 		await Promise.allSettled(promises);
 	} finally {
 		// Runs even when the batch registered no downloads, so the listener can't leak.
@@ -158,6 +184,16 @@ function suggestNewFilename(item, suggest) {
 		// Bare `suggest()` means "use `item.filename`" and is not an override, so it
 		// won't clobber a filename another extension suggested.
 		suggest();
+		removeFilenameListenerIfIdle();
+		return;
+	}
+
+	if (task.sourceDownloadId === item.id) {
+		suggest({
+			filename: task.sourceFilename || 'source.html',
+			conflictAction: 'uniquify',
+		});
+		tasksByDownloadId.delete(item.id);
 		removeFilenameListenerIfIdle();
 		return;
 	}

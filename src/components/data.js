@@ -1,6 +1,13 @@
 // @ts-check
 import { action, batch, computed, effect, signal } from '../html.js';
-import { findImageBySrc, isIncludedIn, isNotIncludedIn, isNotStrictEqual, sanitizeFolderName, unique } from '../utils.js';
+import {
+	findImageBySrc,
+	isIncludedIn,
+	isNotIncludedIn,
+	isNotStrictEqual,
+	sanitizeFolderName,
+	unique,
+} from '../utils.js';
 import { deduplicateImages } from './deduplicateImages.js';
 import { findImages } from './findImages.js';
 import { readBlobUrls } from './readBlobUrls.js';
@@ -31,6 +38,7 @@ export const defaults = {
 	folder_name: '',
 	new_file_name: '',
 	show_download_confirmation: true,
+	save_source_url: true,
 	// Images
 	selected_images: /** @type {string[]} */ ([]),
 	columns: 2,
@@ -90,6 +98,8 @@ export const newFileName = storedSignal('new_file_name');
 
 export const showDownloadConfirmation = storedSignal('show_download_confirmation');
 
+export const saveSourceUrl = storedSignal('save_source_url');
+
 // Images
 /** @type {import('@preact/signals').Signal<string[]>} */
 export const selectedImages = storedSignal('selected_images');
@@ -119,13 +129,14 @@ export const initialize = action(async () => {
 		hide_errored_images: hideErroredImages,
 		new_file_name: newFileName,
 		show_download_confirmation: showDownloadConfirmation,
+		save_source_url: saveSourceUrl,
 		selected_images: selectedImages,
 		columns: columns,
 	};
 	for (const key in options) {
 		const defaultValue = defaults[/** @type {keyof Options} */ (key)];
 		if (Array.isArray(defaultValue) ? Array.isArray(stored[key]) : typeof stored[key] === typeof defaultValue) {
-			options[/** @type {keyof Options} */ (key)].value = /** @type {Options[keyof Options]} */ (stored[key]);
+			options[/** @type {keyof typeof options} */ (key)].value = /** @type {any} */ (stored[key]);
 		}
 	}
 
@@ -293,10 +304,14 @@ export const selectedMatchingImages = computed(() => selectedImages.value.filter
 export const selectedFilteredOutImages = computed(() =>
 	selectedImages.value.filter(isIncludedIn(filteredOutImages.value))
 );
+export const currentSelectedImages = computed(() =>
+	tab.value === 'matching' ? selectedMatchingImages.value : selectedFilteredOutImages.value
+);
 
 // Loading
 export const hostname = signal('');
 export const pageTitle = signal('');
+export const pageUrl = signal('');
 export const limitedAccessHostnames = /\.google\.com/;
 
 export const scriptError = signal('');
@@ -308,6 +323,7 @@ function executeOnTab(
 	/** @type {number | false} */ waitForIdleDOM
 ) {
 	if (activeTab.url) {
+		pageUrl.value = activeTab.url;
 		try {
 			hostname.value = new URL(activeTab.url).hostname;
 		} catch (error) {
@@ -462,6 +478,7 @@ export const reloadImagesWhenPageLoads = action(
 		if (tab?.active || (targetId != null && tabId === targetId)) {
 			if (changeInfo?.url) {
 				isFolderCustomized.value = false;
+				pageUrl.value = tab?.url || changeInfo.url;
 				try {
 					hostname.value = new URL(tab.url).hostname;
 				} catch (error) {

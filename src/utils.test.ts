@@ -57,3 +57,13 @@ describe('sanitizeFolderName', () => {
 	});
 });
 
+describe('generateSourceHtml', () => {
+	it('generates an html document with instant meta-refresh redirect and safe title', () => {
+		// @ts-ignore
+		const { generateSourceHtml } = require('./utils.js');
+		const html = generateSourceHtml('https://example.com/gallery', 'My Cool Gallery');
+		expect(html).toContain('<meta http-equiv="refresh" content="0; url=https://example.com/gallery">');
+		expect(html).toContain('<title>My Cool Gallery</title>');
+		expect(html).toContain('href="https://example.com/gallery"');
+	});
+});

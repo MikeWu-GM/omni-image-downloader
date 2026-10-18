@@ -26,3 +26,29 @@ describe('openImage', () => {
 		expect([blob.type, await blob.text()]).toEqual(['image/webp', 'webp bytes']);
 	});
 });
+
+describe('downloadImages', () => {
+	it('sends download message with source_url_file option when saveSourceUrl is true', async () => {
+		const { downloadImages } = await import('./actions.js');
+		const { folderName, pageTitle, pageUrl, saveSourceUrl } = await import('./data.js');
+
+		folderName.value = 'my_gallery';
+		pageUrl.value = 'https://example.com/art';
+		pageTitle.value = 'Art Gallery';
+		saveSourceUrl.value = true;
+
+		let sentMessage: any;
+		chrome.runtime.sendMessage = ((message: any, cb: any) => {
+			sentMessage = message;
+			cb?.();
+		}) as any;
+
+		await downloadImages(['https://example.com/1.jpg']);
+
+		expect(sentMessage.type).toBe('downloadImages');
+		expect(sentMessage.imagesToDownload).toEqual(['https://example.com/1.jpg']);
+		expect(sentMessage.options.folder_name).toBe('my_gallery');
+		expect(sentMessage.options.source_url_file.filename).toBe('my_gallery/source.html');
+		expect(sentMessage.options.source_url_file.url).toStartWith('data:text/html;charset=utf-8,');
+	});
+});
