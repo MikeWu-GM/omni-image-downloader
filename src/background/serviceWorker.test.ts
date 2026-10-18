@@ -147,3 +147,24 @@ describe('Firefox', () => {
 		});
 	});
 });
+
+describe('serviceWorker tab-scoped sidePanel', () => {
+	it('globally disables the sidePanel on startup so other tabs do not show it by default', () => {
+		expect(chrome.sidePanel.setOptions).toHaveBeenCalledWith({ enabled: false });
+	});
+
+	it('opens the sidePanel specifically for the active tab with tabId and locked path', async () => {
+		const actionListener = chrome.action.onClicked.addListener.mock.calls[0]?.[0];
+		expect(actionListener).toBeDefined();
+
+		await actionListener({ id: 101, windowId: 1 });
+
+		expect(chrome.sidePanel.setOptions).toHaveBeenCalledWith({
+			tabId: 101,
+			path: 'src/SidePanel/index.html?tabId=101',
+			enabled: true,
+		});
+		expect(chrome.sidePanel.open).toHaveBeenCalledWith({ tabId: 101 });
+	});
+});
+

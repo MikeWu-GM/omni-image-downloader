@@ -23,6 +23,11 @@ export const mockChrome = (opts?: { storage?: Record<string, any> }) => {
 	const chrome = mockRecursivePartial<any>({
 		action: {
 			setPopup: mock(),
+			onClicked: createChromeEvent(),
+		},
+		sidePanel: {
+			open: mock(),
+			setOptions: mock(),
 		},
 		downloads: {
 			download: mock(),

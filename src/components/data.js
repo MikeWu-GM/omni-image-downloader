@@ -302,63 +302,101 @@ export const scriptError = signal('');
 
 const browserPageUrl = /^(about|chrome|chrome-extension|edge|moz-extension|view-source):/;
 
+function executeOnTab(
+	/** @type {chrome.tabs.Tab | { id: number, url?: string }} */ activeTab,
+	/** @type {number | false} */ waitForIdleDOM
+) {
+	if (activeTab.url) {
+		try {
+			hostname.value = new URL(activeTab.url).hostname;
+		} catch (error) {
+			hostname.value = activeTab.url;
+		}
+	}
+
+	scriptError.value = '';
+	if (activeTab.id == null) return;
+	const tabId = activeTab.id;
+
+	chrome.scripting
+		.executeScript({
+			target: { tabId, allFrames: true },
+			func: findImages,
+			args: [{ waitForIdleDOM }],
+		})
+		.then((messages) => Promise.all(messages.map((message) => withBlobUrlsRead(tabId, message))))
+		.then((messages) => {
+			batch(() => {
+				allImages.value = unique(messages.flatMap((message) => message.result?.allImages || []));
+				linkedImages.value = unique(messages.flatMap((message) => message.result?.linkedImages || []));
+				// Use `allImages` to preserve original DOM order.
+				erroredImages.value = allImages.value.filter(isIncludedIn(erroredImages.value));
+				selectedImages.value = allImages.value.filter(isIncludedIn(selectedImages.value));
+
+				for (const message of messages) {
+					if (message.result?.origin) {
+						try {
+							hostname.value = new URL(message?.result?.origin).hostname;
+						} catch (error) {
+							// ignore
+						}
+					}
+				}
+			});
+
+			if (!waitForIdleDOM) {
+				loadImagesFromActiveTab({ waitForIdleDOM: 1000 });
+			}
+		})
+		.catch((error) => {
+			// Ignore some errors that happen regularly when navigating around
+			if (error.message === 'Cannot access a chrome:// URL') return;
+			// Extensions can't access browser pages, and Firefox's error for them is the same as for losing access to a web page
+			if (activeTab.url && browserPageUrl.test(activeTab.url)) return;
+
+			scriptError.value = error.message;
+		});
+}
+
+/** @type {number | null} */
+let lockedTabId = null;
+
+export function getLockedTabId() {
+	if (lockedTabId != null) return lockedTabId;
+	const urlTabId = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('tabId');
+	if (urlTabId) {
+		lockedTabId = parseInt(urlTabId, 10);
+		return lockedTabId;
+	}
+	return null;
+}
+
+export function setLockedTabId(/** @type {number | null} */ tabId) {
+	lockedTabId = tabId;
+}
+
 export const loadImagesFromActiveTab = action(
 	(/** @type {{ waitForIdleDOM: number | false }} */ { waitForIdleDOM } = { waitForIdleDOM: false }) => {
+		const targetId = getLockedTabId();
+		if (targetId != null) {
+			if (chrome.tabs.get) {
+				chrome.tabs.get(targetId, (tab) => {
+					if (tab) executeOnTab(tab, waitForIdleDOM);
+				});
+			} else {
+				executeOnTab({ id: targetId }, waitForIdleDOM);
+			}
+			return;
+		}
+
 		chrome.windows.getCurrent((currentWindow) => {
 			chrome.tabs.query({ active: true, windowId: currentWindow.id }, (activeTabs) => {
 				if (activeTabs.length === 0) return;
-
 				const activeTab = activeTabs[0];
-				if (activeTab.url) {
-					try {
-						hostname.value = new URL(activeTab.url).hostname;
-					} catch (error) {
-						hostname.value = activeTab.url;
-					}
+				if (activeTab.id != null) {
+					setLockedTabId(activeTab.id);
 				}
-
-				scriptError.value = '';
-				if (activeTab.id == null) return;
-				const tabId = activeTab.id;
-
-				chrome.scripting
-					.executeScript({
-						target: { tabId, allFrames: true },
-						func: findImages,
-						args: [{ waitForIdleDOM }],
-					})
-					.then((messages) => Promise.all(messages.map((message) => withBlobUrlsRead(tabId, message))))
-					.then((messages) => {
-						batch(() => {
-							allImages.value = unique(messages.flatMap((message) => message.result?.allImages || []));
-							linkedImages.value = unique(messages.flatMap((message) => message.result?.linkedImages || []));
-							// Use `allImages` to preserve original DOM order.
-							erroredImages.value = allImages.value.filter(isIncludedIn(erroredImages.value));
-							selectedImages.value = allImages.value.filter(isIncludedIn(selectedImages.value));
-
-							for (const message of messages) {
-								if (message.result?.origin) {
-									try {
-										hostname.value = new URL(message?.result?.origin).hostname;
-									} catch (error) {
-										// ignore
-									}
-								}
-							}
-						});
-
-						if (!waitForIdleDOM) {
-							loadImagesFromActiveTab({ waitForIdleDOM: 1000 });
-						}
-					})
-					.catch((error) => {
-						// Ignore some errors that happen regularly when navigating around
-						if (error.message === 'Cannot access a chrome:// URL') return;
-						// Extensions can't access browser pages, and Firefox's error for them is the same as for losing access to a web page
-						if (activeTab.url && browserPageUrl.test(activeTab.url)) return;
-
-						scriptError.value = error.message;
-					});
+				executeOnTab(activeTab, waitForIdleDOM);
 			});
 		});
 	}
@@ -399,13 +437,18 @@ async function withBlobUrlsRead(/** @type {number} */ tabId, /** @type {Message}
 
 export const reloadImagesWhenPageLoads = action(
 	(/** @type {number | undefined}*/ tabId, /** @type {any} */ changeInfo, /** @type {any} */ tab) => {
+		const targetId = getLockedTabId();
+		if (targetId != null) {
+			if (!tab || tabId !== targetId) return;
+		}
+
 		if (!tab) {
 			hostname.value = '';
 			loadImagesFromActiveTab({ waitForIdleDOM: 1 });
 			return;
 		}
 
-		if (tab?.active) {
+		if (tab?.active || (targetId != null && tabId === targetId)) {
 			if (changeInfo?.url) {
 				try {
 					hostname.value = new URL(tab.url).hostname;

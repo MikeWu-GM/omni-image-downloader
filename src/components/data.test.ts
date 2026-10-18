@@ -17,6 +17,7 @@ import {
 	filterUrl,
 	filterUrlMode,
 	folderName,
+	hostname,
 	imagesCache,
 	initialize,
 	linkedImages,
@@ -24,8 +25,10 @@ import {
 	matchingImages,
 	newFileName,
 	openMode,
+	reloadImagesWhenPageLoads,
 	scriptError,
 	selectedImages,
+	setLockedTabId,
 	showAdvancedFilters,
 	showDownloadConfirmation,
 } from './data.js';
@@ -62,6 +65,7 @@ function setupMocks(initialStorage?: Record<string, any>) {
 }
 
 beforeEach(() => {
+	setLockedTabId(null);
 	openMode.value = 'sidebar';
 	filterUrl.value = '';
 	filterUrlMode.value = 'normal';
@@ -291,5 +295,46 @@ describe('loadImagesFromActiveTab', () => {
 		await new Promise((resolve) => setTimeout(resolve, 10));
 
 		expect(scriptError.value).toBe(firefoxError);
+	});
+
+	it('targets the tabId from the URL query parameter when present', async () => {
+		const chrome = (global as any).chrome;
+		window.location.search = '?tabId=42';
+		chrome.tabs.get = mock((tabId: number, callback: any) => callback({ id: tabId, url: 'https://example.com/locked' }));
+		chrome.tabs.query = mock((_query: any, callback: any) => callback([{ id: 7, url: 'https://example.com/other' }]));
+		chrome.scripting = {
+			executeScript: mock(async () => [
+				{ frameId: 0, result: { allImages: ['https://example.com/locked.png'], linkedImages: [] } },
+			]),
+		};
+
+		loadImagesFromActiveTab({ waitForIdleDOM: 1 });
+		await new Promise((resolve) => setTimeout(resolve, 10));
+
+		expect(chrome.scripting.executeScript.mock.calls[0][0].target.tabId).toBe(42);
+		expect(allImages.value).toEqual(['https://example.com/locked.png']);
+
+		window.location.search = '';
+	});
+});
+
+describe('reloadImagesWhenPageLoads', () => {
+	it('ignores tab switching and updates from other tabs when tabId is locked in URL', () => {
+		const chrome = (global as any).chrome;
+		window.location.search = '?tabId=42';
+		hostname.value = 'example.com';
+		chrome.scripting = { executeScript: mock() };
+
+		// Simulate tab switching (onActivated passes tabId 99 and null tab)
+		reloadImagesWhenPageLoads(99, {}, null);
+		expect(hostname.value).toBe('example.com');
+		expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+
+		// Simulate another tab updating (onUpdated passes tabId 99)
+		reloadImagesWhenPageLoads(99, { status: 'complete' }, { active: true, url: 'https://other.com' });
+		expect(hostname.value).toBe('example.com');
+		expect(chrome.scripting.executeScript).not.toHaveBeenCalled();
+
+		window.location.search = '';
 	});
 });

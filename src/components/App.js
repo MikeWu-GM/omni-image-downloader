@@ -25,8 +25,11 @@ function AppWithoutErrorBoundary() {
 	useTheme();
 
 	useEffect(() => {
+		const urlTabId = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('tabId');
 		chrome.tabs.onUpdated.addListener(reloadImagesWhenPageLoads);
-		chrome.tabs.onActivated.addListener(({ tabId }) => reloadImagesWhenPageLoads(tabId, {}, null));
+		if (!urlTabId) {
+			chrome.tabs.onActivated.addListener(({ tabId }) => reloadImagesWhenPageLoads(tabId, {}, null));
+		}
 
 		initialize().then(() => loadImagesFromActiveTab({ waitForIdleDOM: false }));
 	}, []);

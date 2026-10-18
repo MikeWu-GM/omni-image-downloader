@@ -20,6 +20,12 @@ chrome.storage.onChanged.addListener(async (changes, areaName) => {
 // Initialize popup state on service worker startup
 updateActionPopup();
 
+// Disable the side panel globally so newly opened tabs do not show it by default.
+// Only tabs explicitly opened by the user will have enabled: true.
+if (chrome.sidePanel?.setOptions) {
+	chrome.sidePanel.setOptions({ enabled: false });
+}
+
 async function updateActionPopup() {
 	const { open_mode = 'sidebar' } = await chrome.storage.local.get('open_mode');
 	// Some Chromium-based browsers (e.g. Opera) don't implement the sidePanel
@@ -33,10 +39,25 @@ async function updateActionPopup() {
 	}
 }
 
-// Handle icon click - open sidebar (only fires when popup is cleared)
+// Handle icon click - open sidebar specifically for the active tab
 if (chrome.sidePanel) {
-	chrome.action.onClicked.addListener(async (tab) => {
-		await chrome.sidePanel.open({ windowId: tab.windowId });
+	chrome.action.onClicked.addListener((tab) => {
+		if (tab.id == null) return;
+
+		if (chrome.sidePanel.setOptions) {
+			chrome.sidePanel.setOptions({
+				tabId: tab.id,
+				path: `src/SidePanel/index.html?tabId=${tab.id}`,
+				enabled: true,
+			});
+		}
+
+		// Must call sidePanel.open synchronously to preserve the user gesture token!
+		try {
+			chrome.sidePanel.open({ tabId: tab.id });
+		} catch {
+			chrome.sidePanel.open({ windowId: tab.windowId });
+		}
 	});
 }
 

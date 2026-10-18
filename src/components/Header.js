@@ -11,6 +11,7 @@ import {
 	filterMinWidthEnabled,
 	filterUrl,
 	filterUrlMode,
+	getLockedTabId,
 	hideErroredImages,
 	hostname,
 	limitedAccessHostnames,
@@ -107,6 +108,10 @@ export function Header(/** @type {Object} */ props) {
 									onClick=${async () => {
 										if (openMode.value === 'sidebar') {
 											openMode.value = 'popup';
+											const tabId = getLockedTabId();
+											if (tabId != null && chrome.sidePanel?.setOptions) {
+												chrome.sidePanel.setOptions({ tabId, enabled: false });
+											}
 											openPopup();
 										} else {
 											openMode.value = 'sidebar';
@@ -123,7 +128,17 @@ export function Header(/** @type {Object} */ props) {
 						: null
 				}
 
-				<button class="min-w-8" title="Close extension" onClick=${() => window.close()}>
+				<button
+					class="min-w-8"
+					title="Close extension"
+					onClick=${() => {
+						const tabId = getLockedTabId();
+						if (tabId != null && chrome.sidePanel?.setOptions) {
+							chrome.sidePanel.setOptions({ tabId, enabled: false });
+						}
+						window.close();
+					}}
+				>
 					<img class="inline w-3" src="/images/times.svg" />
 				</button>
 			</div>
@@ -148,8 +163,23 @@ async function openPopup() {
 async function openSidebar() {
 	try {
 		await chrome.action.setPopup({ popup: '' });
-		const currentWindow = await new Promise((resolve) => chrome.windows.getCurrent(resolve));
-		await chrome.sidePanel.open({ windowId: currentWindow.id });
+		const activeTabs = await new Promise((resolve) =>
+			chrome.tabs.query({ active: true, currentWindow: true }, resolve)
+		);
+		if (activeTabs && activeTabs.length > 0 && activeTabs[0].id != null) {
+			const tabId = activeTabs[0].id;
+			if (chrome.sidePanel?.setOptions) {
+				await chrome.sidePanel.setOptions({
+					tabId,
+					path: `src/SidePanel/index.html?tabId=${tabId}`,
+					enabled: true,
+				});
+			}
+			await chrome.sidePanel.open({ tabId });
+		} else {
+			const currentWindow = await new Promise((resolve) => chrome.windows.getCurrent(resolve));
+			await chrome.sidePanel.open({ windowId: currentWindow.id });
+		}
 		window.close(); // Closes the popup
 	} catch (error) {
 		console.error('Error opening side panel:', error);
