@@ -222,5 +222,6 @@ export async function findImages(
 		allImages: extractImagesFromSelector(roots, 'img, image, source, use, a, [class], [style]'),
 		linkedImages: extractImagesFromSelector(roots, 'a'), // Do not merge into `allImages` - we want to preserve the order of images from the DOM
 		origin: context.window.location.origin,
+		title: context.document.title || '',
 	};
 }

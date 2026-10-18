@@ -1,6 +1,6 @@
 // @ts-check
 import { action, batch, computed, effect, signal } from '../html.js';
-import { findImageBySrc, isIncludedIn, isNotIncludedIn, isNotStrictEqual, unique } from '../utils.js';
+import { findImageBySrc, isIncludedIn, isNotIncludedIn, isNotStrictEqual, sanitizeFolderName, unique } from '../utils.js';
 import { deduplicateImages } from './deduplicateImages.js';
 import { findImages } from './findImages.js';
 import { readBlobUrls } from './readBlobUrls.js';
@@ -83,7 +83,8 @@ export const onlyImagesFromLinks = storedSignal('only_images_from_links');
 export const hideErroredImages = storedSignal('hide_errored_images');
 
 // Download
-export const folderName = storedSignal('folder_name');
+export const folderName = signal('');
+export const isFolderCustomized = signal(false);
 
 export const newFileName = storedSignal('new_file_name');
 
@@ -116,7 +117,6 @@ export const initialize = action(async () => {
 		only_unique_images: onlyUniqueImages,
 		only_images_from_links: onlyImagesFromLinks,
 		hide_errored_images: hideErroredImages,
-		folder_name: folderName,
 		new_file_name: newFileName,
 		show_download_confirmation: showDownloadConfirmation,
 		selected_images: selectedImages,
@@ -296,6 +296,7 @@ export const selectedFilteredOutImages = computed(() =>
 
 // Loading
 export const hostname = signal('');
+export const pageTitle = signal('');
 export const limitedAccessHostnames = /\.google\.com/;
 
 export const scriptError = signal('');
@@ -303,7 +304,7 @@ export const scriptError = signal('');
 const browserPageUrl = /^(about|chrome|chrome-extension|edge|moz-extension|view-source):/;
 
 function executeOnTab(
-	/** @type {chrome.tabs.Tab | { id: number, url?: string }} */ activeTab,
+	/** @type {chrome.tabs.Tab | { id: number, url?: string, title?: string }} */ activeTab,
 	/** @type {number | false} */ waitForIdleDOM
 ) {
 	if (activeTab.url) {
@@ -312,6 +313,9 @@ function executeOnTab(
 		} catch (error) {
 			hostname.value = activeTab.url;
 		}
+	}
+	if (activeTab.title) {
+		pageTitle.value = activeTab.title;
 	}
 
 	scriptError.value = '';
@@ -341,6 +345,13 @@ function executeOnTab(
 							// ignore
 						}
 					}
+					if (message.result?.title) {
+						pageTitle.value = message.result.title;
+					}
+				}
+
+				if (!isFolderCustomized.value) {
+					folderName.value = sanitizeFolderName(pageTitle.value || activeTab.title, hostname.value);
 				}
 			});
 
@@ -450,6 +461,7 @@ export const reloadImagesWhenPageLoads = action(
 
 		if (tab?.active || (targetId != null && tabId === targetId)) {
 			if (changeInfo?.url) {
+				isFolderCustomized.value = false;
 				try {
 					hostname.value = new URL(tab.url).hostname;
 				} catch (error) {

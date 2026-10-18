@@ -49,3 +49,24 @@ export const getReferralUrl = (/** @type {string} */ origin, /** @type {Object} 
 	for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
 	return url.toString();
 };
+
+/** @type {(rawTitle?: string, fallbackHost?: string) => string} */
+export const sanitizeFolderName = (rawTitle = '', fallbackHost = '') => {
+	const sanitize = (/** @type {string} */ str) =>
+		str
+			.replace(/[:*?"<>|\\/\x00-\x1f\x7f]+\s*/g, '_')
+			.replace(/_+/g, '_')
+			.replace(/^[\s._-]+|[\s._-]+$/g, '')
+			.trim()
+			.slice(0, 80)
+			.replace(/[\s._-]+$/, '');
+
+	const cleanTitle = sanitize(rawTitle || '');
+	if (cleanTitle) return cleanTitle;
+
+	const cleanHost = sanitize(fallbackHost || '');
+	if (cleanHost) return cleanHost;
+
+	return 'images';
+};
+

@@ -316,7 +316,34 @@ describe('loadImagesFromActiveTab', () => {
 
 		window.location.search = '';
 	});
+
+	it('prefills folderName with sanitized page title from active tab', async () => {
+		const chrome = (global as any).chrome;
+		chrome.windows = { getCurrent: (cb: any) => cb({ id: 1 }) };
+		chrome.tabs.query = mock((_query: any, callback: any) =>
+			callback([{ id: 10, url: 'https://example.com/gallery', title: 'My Gallery: Summer 2026' }])
+		);
+		chrome.scripting = {
+			executeScript: mock(async () => [
+				{
+					frameId: 0,
+					result: {
+						allImages: ['https://example.com/pic.jpg'],
+						linkedImages: [],
+						title: 'My Gallery: Summer 2026',
+					},
+				},
+			]),
+		};
+
+		folderName.value = '';
+		loadImagesFromActiveTab({ waitForIdleDOM: 1 });
+		await new Promise((resolve) => setTimeout(resolve, 10));
+
+		expect(folderName.value).toBe('My Gallery_Summer 2026');
+	});
 });
+
 
 describe('reloadImagesWhenPageLoads', () => {
 	it('ignores tab switching and updates from other tabs when tabId is locked in URL', () => {

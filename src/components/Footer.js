@@ -3,7 +3,7 @@ import html, { useSignal } from '../html.js';
 
 import { removeSpecialCharacters, setToInvertedCheckboxValue } from '../utils.js';
 import * as actions from './actions.js';
-import { folderName, newFileName, selectedImages, showDownloadConfirmation } from './data.js';
+import { folderName, isFolderCustomized, newFileName, selectedImages, showDownloadConfirmation } from './data.js';
 import { DownloadButton } from './DownloadButton.js';
 import { DownloadConfirmation } from './DownloadConfirmation.js';
 import { useRunAfterUpdate } from './useRunAfterUpdate.js';
@@ -60,6 +60,7 @@ export function Footer(/** @type {Object} */ props) {
 											input.selectionStart = input.selectionEnd = savedSelectionStart;
 										});
 
+										isFolderCustomized.value = true;
 										folderName.value = removeSpecialCharacters(input.value);
 									}}
 								/>
