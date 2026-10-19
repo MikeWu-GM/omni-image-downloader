@@ -2,3 +2,5 @@ build
 build-firefox
 coverage
 node_modules
+GEMINI.md
+.documents/

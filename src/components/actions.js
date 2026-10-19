@@ -1,6 +1,33 @@
 // @ts-check
 import { generateSourceHtml } from '../utils.js';
-import { folderName, newFileName, pageTitle, pageUrl, saveSourceUrl } from './data.js';
+import {
+	currentSelectedImages,
+	downloadConfirmationIsShown,
+	downloadIsInProgress,
+	folderName,
+	newFileName,
+	pageTitle,
+	pageUrl,
+	saveSourceUrl,
+	showDownloadConfirmation,
+} from './data.js';
+
+export const triggerDownload = async () => {
+	downloadIsInProgress.value = true;
+	try {
+		await downloadImages(currentSelectedImages.value);
+	} finally {
+		downloadIsInProgress.value = false;
+	}
+};
+
+export const maybeDownloadImages = () => {
+	if (showDownloadConfirmation.value && currentSelectedImages.value.length > 1) {
+		downloadConfirmationIsShown.value = true;
+	} else {
+		triggerDownload();
+	}
+};
 
 export const downloadImages = (/** @type {string[]} */ imagesToDownload) =>
 	new Promise((resolve) => {

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
-import { mockChrome } from '../test-helpers';
+import { mockChrome, mockDOM } from '../test-helpers';
+
+mockDOM();
 
 let chrome: ReturnType<typeof mockChrome>;
 
@@ -50,5 +52,49 @@ describe('downloadImages', () => {
 		expect(sentMessage.options.folder_name).toBe('my_gallery');
 		expect(sentMessage.options.source_url_file.filename).toBe('my_gallery/source.html');
 		expect(sentMessage.options.source_url_file.url).toStartWith('data:text/html;charset=utf-8,');
+	});
+});
+
+describe('maybeDownloadImages & triggerDownload', () => {
+	it('shows download confirmation when showDownloadConfirmation is true and multiple images selected', async () => {
+		const { maybeDownloadImages } = await import('./actions.js');
+		const { allImages, imagesCache, selectedImages, tab, showDownloadConfirmation, downloadConfirmationIsShown } =
+			await import('./data.js');
+
+		imagesCache.value = document.createElement('div');
+		const imgs = ['https://example.com/1.jpg', 'https://example.com/2.jpg'];
+		tab.value = 'matching';
+		allImages.value = imgs;
+		selectedImages.value = imgs;
+		showDownloadConfirmation.value = true;
+		downloadConfirmationIsShown.value = false;
+
+		maybeDownloadImages();
+
+		expect(downloadConfirmationIsShown.value).toBe(true);
+	});
+
+	it('triggers download directly when showDownloadConfirmation is false', async () => {
+		const { maybeDownloadImages } = await import('./actions.js');
+		const { allImages, selectedImages, tab, showDownloadConfirmation, downloadConfirmationIsShown } =
+			await import('./data.js');
+
+		const imgs = ['https://example.com/1.jpg'];
+		tab.value = 'matching';
+		allImages.value = imgs;
+		selectedImages.value = imgs;
+		showDownloadConfirmation.value = false;
+		downloadConfirmationIsShown.value = false;
+
+		let sent = false;
+		chrome.runtime.sendMessage = ((message: any, cb: any) => {
+			sent = true;
+			cb?.();
+		}) as any;
+
+		maybeDownloadImages();
+
+		expect(sent).toBe(true);
+		showDownloadConfirmation.value = true;
 	});
 });

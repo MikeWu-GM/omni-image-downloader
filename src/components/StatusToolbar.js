@@ -2,10 +2,13 @@
 import html from '../html.js';
 import { isIncludedIn, isNotIncludedIn, unique } from '../utils.js';
 import { Checkbox } from './Checkbox.js';
+import { DownloadButton } from './DownloadButton.js';
+import { maybeDownloadImages } from './actions.js';
 import {
 	columns,
 	currentSelectedImages,
 	displayedImages,
+	downloadIsInProgress,
 	filteredOutImages,
 	matchingImages,
 	selectedFilteredOutImages,
@@ -95,6 +98,14 @@ export function StatusToolbar() {
 				>
 					<span class="text-nowrap">${currentSelectedImages.value.length} selected</span>
 				<//>
+
+				<!-- Download Button beside selected -->
+				<${DownloadButton}
+					class="flex items-center gap-1 rounded-lg px-2.5 py-1 font-semibold shadow-xs"
+					disabled=${currentSelectedImages.value.length === 0}
+					loading=${downloadIsInProgress.value}
+					onClick=${maybeDownloadImages}
+				/>
 			</div>
 
 			<!-- Right: View Controls (Columns & Theme) -->

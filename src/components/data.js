@@ -142,6 +142,9 @@ export const showDownloadConfirmation = storedSignal('show_download_confirmation
 
 export const saveSourceUrl = storedSignal('save_source_url');
 
+export const downloadIsInProgress = signal(false);
+export const downloadConfirmationIsShown = signal(false);
+
 // Images
 /** @type {import('@preact/signals').Signal<string[]>} */
 export const selectedImages = storedSignal('selected_images');

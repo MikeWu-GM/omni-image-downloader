@@ -1,40 +1,22 @@
 // @ts-check
-import html, { useSignal } from '../html.js';
+import html from '../html.js';
 
 import { removeSpecialCharacters, setToCheckboxValue, setToInvertedCheckboxValue } from '../utils.js';
-import * as actions from './actions.js';
+import { triggerDownload } from './actions.js';
 import { Checkbox } from './Checkbox.js';
 import {
 	currentSelectedImages,
+	downloadConfirmationIsShown,
 	folderName,
 	isFolderCustomized,
 	newFileName,
 	saveSourceUrl,
 	showDownloadConfirmation,
 } from './data.js';
-import { DownloadButton } from './DownloadButton.js';
 import { DownloadConfirmation } from './DownloadConfirmation.js';
 import { useRunAfterUpdate } from './useRunAfterUpdate.js';
 
 export function Footer(/** @type {Object} */ props) {
-	// Download
-	const downloadIsInProgress = useSignal(false);
-	const downloadConfirmationIsShown = useSignal(false);
-
-	function maybeDownloadImages() {
-		if (showDownloadConfirmation.value && currentSelectedImages.value.length > 1) {
-			downloadConfirmationIsShown.value = true;
-		} else {
-			downloadImages();
-		}
-	}
-
-	async function downloadImages() {
-		downloadIsInProgress.value = true;
-		await actions.downloadImages(currentSelectedImages.value);
-		downloadIsInProgress.value = false;
-	}
-
 	const runAfterUpdate = useRunAfterUpdate();
 
 	return html`
@@ -46,11 +28,11 @@ export function Footer(/** @type {Object} */ props) {
 								numberOfImages=${currentSelectedImages.value.length}
 								onCheckboxChange=${setToInvertedCheckboxValue(showDownloadConfirmation)}
 								onClose=${() => (downloadConfirmationIsShown.value = false)}
-								onConfirm=${downloadImages}
+								onConfirm=${triggerDownload}
 							/>
 						`
 					: html`
-							<div class="grid grid-cols-[1fr_1fr_auto] gap-2">
+							<div class="grid grid-cols-2 gap-2">
 								<input
 									id="subfolder_name_input"
 									class="flex-1"
@@ -92,13 +74,6 @@ export function Footer(/** @type {Object} */ props) {
 
 										newFileName.value = removeSpecialCharacters(input.value);
 									}}
-								/>
-
-								<${DownloadButton}
-									class="col-span-1"
-									disabled=${currentSelectedImages.value.length === 0}
-									loading=${downloadIsInProgress.value}
-									onClick=${maybeDownloadImages}
 								/>
 							</div>
 
