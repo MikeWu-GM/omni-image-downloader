@@ -7,6 +7,8 @@ interface MockElement {
 	src?: string;
 	href?: string;
 	id?: number;
+	naturalWidth?: number;
+	naturalHeight?: number;
 	shadowRoot?: MockShadowRoot;
 	getAttribute?: (attr: string) => string | null;
 }
@@ -979,5 +981,37 @@ describe('findImages', () => {
 		const result = await runFindImages(mockDocument, mockWindow);
 
 		expect(result.allImages).toContain('http://example.com/shadow-image.jpg');
+	});
+
+	it('extracts naturalWidth and naturalHeight of img elements into imageDimensions', async () => {
+		const img1: MockElement = {
+			tagName: 'IMG',
+			src: 'http://example.com/photo.png',
+			naturalWidth: 1200,
+			naturalHeight: 800,
+		};
+		const img2: MockElement = {
+			tagName: 'IMG',
+			src: 'http://example.com/icon.png',
+			naturalWidth: 32,
+			naturalHeight: 32,
+		};
+		const mockDocument: MockDocument = {
+			querySelectorAll(selector: string) {
+				if (selector.includes('img')) return [img1, img2];
+				return [];
+			},
+		};
+		const mockWindow: MockWindow = {
+			location: { origin: 'http://example.com' },
+			getComputedStyle: () => ({ backgroundImage: '' }),
+		};
+
+		const result = await runFindImages(mockDocument, mockWindow);
+
+		expect(result.imageDimensions).toEqual({
+			'http://example.com/photo.png': { width: 1200, height: 800 },
+			'http://example.com/icon.png': { width: 32, height: 32 },
+		});
 	});
 });

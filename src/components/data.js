@@ -192,6 +192,8 @@ function parseLocalStorageValue(
 // State
 export const allImages = signal(/** @type {string[]} */ ([]));
 export const linkedImages = signal(/** @type {string[]} */ ([]));
+export const imageDimensions = signal(/** @type {Record<string, { width: number; height: number }>} */ ({}));
+export const imagesLoadedVersion = signal(0);
 
 export const imagesCache = { value: /** @type {HTMLDivElement | null} */ (null) }; // Not displayed; used for loading images and their stats like size or resolution
 
@@ -202,6 +204,7 @@ export const imageLoaded = action((/** @type {string | undefined} */ url) => {
 		if (erroredImages.peek().includes(url)) {
 			erroredImages.value = erroredImages.value.filter(isNotStrictEqual(url));
 		}
+		imagesLoadedVersion.value++;
 	});
 });
 
@@ -214,6 +217,7 @@ export const imageErrored = action((/** @type {string | undefined} */ url) => {
 			// Use `allImages` to preserve order
 			erroredImages.value = allImages.value.filter(isIncludedIn([...erroredImages.value, url]));
 		}
+		imagesLoadedVersion.value++;
 	});
 });
 
@@ -266,23 +270,35 @@ export const matchingImages = computed(() => {
 		}
 	}
 
+	// Subscribe to imagesLoadedVersion so matchingImages re-evaluates when images finish loading
+	imagesLoadedVersion.value;
+	const currentDimensions = imageDimensions.value;
+
 	filtered = filtered.filter((url) => {
 		if (!imagesCache.value) return false;
 
-		const image = findImageBySrc(imagesCache.value, url);
+		const cachedDim = currentDimensions[url];
+		let width = cachedDim?.width;
+		let height = cachedDim?.height;
+
+		if (width == null || height == null) {
+			const image = findImageBySrc(imagesCache.value, url);
+			width = image?.naturalWidth || 0;
+			height = image?.naturalHeight || 0;
+		}
 
 		return (
 			// image && <-- we don't want this, it results in overly filtered images on initial load
-			(!filterMinWidthEnabled.value || filterMinWidth.value <= (image?.naturalWidth || 0)) &&
-			(!filterMaxWidthEnabled.value || (image?.naturalWidth || 0) <= filterMaxWidth.value) &&
-			(!filterMinHeightEnabled.value || filterMinHeight.value <= (image?.naturalHeight || 0)) &&
-			(!filterMaxHeightEnabled.value || (image?.naturalHeight || 0) <= filterMaxHeight.value) &&
+			(!filterMinWidthEnabled.value || filterMinWidth.value <= width) &&
+			(!filterMaxWidthEnabled.value || width <= filterMaxWidth.value) &&
+			(!filterMinHeightEnabled.value || filterMinHeight.value <= height) &&
+			(!filterMaxHeightEnabled.value || height <= filterMaxHeight.value) &&
 			(!hideErroredImages.value || !erroredImages.value.includes(url))
 		);
 	});
 
 	if (onlyUniqueImages.value && imagesCache.value) {
-		filtered = deduplicateImages(filtered, imagesCache.value);
+		filtered = deduplicateImages(filtered, imagesCache.value, currentDimensions);
 	}
 
 	return filtered;
@@ -349,6 +365,13 @@ function executeOnTab(
 			batch(() => {
 				allImages.value = unique(messages.flatMap((message) => message.result?.allImages || []));
 				linkedImages.value = unique(messages.flatMap((message) => message.result?.linkedImages || []));
+				const dimensions = /** @type {Record<string, { width: number; height: number }>} */ ({});
+				for (const message of messages) {
+					if (message.result?.imageDimensions) {
+						Object.assign(dimensions, message.result.imageDimensions);
+					}
+				}
+				imageDimensions.value = dimensions;
 				// Use `allImages` to preserve original DOM order.
 				erroredImages.value = allImages.value.filter(isIncludedIn(erroredImages.value));
 				selectedImages.value = allImages.value.filter(isIncludedIn(selectedImages.value));

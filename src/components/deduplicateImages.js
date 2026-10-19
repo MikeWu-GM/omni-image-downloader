@@ -3,7 +3,12 @@ import { findImageBySrc, unique } from '../utils.js';
 
 const priorities = ['png', 'jpg', 'jpeg', 'bmp', 'webp', 'avif'];
 
-export function deduplicateImages(/** @type {string[]} */ urls, /** @type {HTMLDivElement} */ imagesCache) {
+/**
+ * @param {string[]} urls
+ * @param {HTMLDivElement} imagesCache
+ * @param {Record<string, { width: number; height: number }>} [imageDimensions]
+ */
+export function deduplicateImages(urls, imagesCache, imageDimensions = {}) {
 	const keysByUrl = new Map(urls.map((url) => [url, getNormalizedBaseKey(url)]));
 	const keys = new Set(keysByUrl.values());
 
@@ -16,7 +21,7 @@ export function deduplicateImages(/** @type {string[]} */ urls, /** @type {HTMLD
 
 	const result = [];
 	for (const groupUrls of groups.values()) {
-		const bestImageUrl = pickBestImageUrl(groupUrls, imagesCache);
+		const bestImageUrl = pickBestImageUrl(groupUrls, imagesCache, imageDimensions);
 		if (bestImageUrl) {
 			result.push(bestImageUrl);
 		}
@@ -110,7 +115,12 @@ function getNormalizedBaseKey(/** @type {string} */ url) {
 	}
 }
 
-function pickBestImageUrl(/** @type {string[]} */ urlStrings, /** @type {HTMLDivElement} */ imagesCache) {
+/**
+ * @param {string[]} urlStrings
+ * @param {HTMLDivElement} imagesCache
+ * @param {Record<string, { width: number; height: number }>} [imageDimensions]
+ */
+function pickBestImageUrl(urlStrings, imagesCache, imageDimensions = {}) {
 	const uniqueUrlStrings = unique(urlStrings);
 
 	const realUrls = /** @type {URL[]} */ ([]);
@@ -125,6 +135,10 @@ function pickBestImageUrl(/** @type {string[]} */ urlStrings, /** @type {HTMLDiv
 	if (realUrls.length === 0) return undefined;
 
 	const getResolution = (/** @type {URL} */ url) => {
+		const dim = imageDimensions?.[url.href];
+		if (dim && dim.width > 0 && dim.height > 0) {
+			return dim;
+		}
 		const img = findImageBySrc(imagesCache, url.href);
 		return img ? { width: img.naturalWidth, height: img.naturalHeight } : { width: 0, height: 0 };
 	};

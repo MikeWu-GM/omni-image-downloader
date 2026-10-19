@@ -74,6 +74,8 @@ export async function findImages(
 		return roots;
 	}
 
+	const imageDimensions = /** @type {Record<string, { width: number; height: number }>} */ ({});
+
 	/** @returns {string[]} */
 	function extractImagesFromSelector(/** @type {(Document | ShadowRoot)[]} */ roots, /** @type {string} */ selector) {
 		const images = /** @type {Set<string>} */ (new Set());
@@ -83,7 +85,20 @@ export async function findImages(
 				const urls = extractImageUrlsFromElement(element);
 				urls?.forEach((url) => {
 					if (url) {
-						images.add(relativeUrlToAbsolute(url));
+						const absUrl = relativeUrlToAbsolute(url);
+						images.add(absUrl);
+
+						if (element.tagName.toLowerCase() === 'img') {
+							const img = /** @type {HTMLImageElement} */ (element);
+							const width = img.naturalWidth || 0;
+							const height = img.naturalHeight || 0;
+							if (width > 0 && height > 0) {
+								const existing = imageDimensions[absUrl];
+								if (!existing || width * height > existing.width * existing.height) {
+									imageDimensions[absUrl] = { width, height };
+								}
+							}
+						}
 					}
 				});
 			});
@@ -221,6 +236,7 @@ export async function findImages(
 	return {
 		allImages: extractImagesFromSelector(roots, 'img, image, source, use, a, [class], [style]'),
 		linkedImages: extractImagesFromSelector(roots, 'a'), // Do not merge into `allImages` - we want to preserve the order of images from the DOM
+		imageDimensions,
 		origin: context.window.location.origin,
 		title: context.document.title || '',
 	};

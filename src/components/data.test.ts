@@ -19,6 +19,8 @@ import {
 	filterUrlMode,
 	folderName,
 	hostname,
+	imageDimensions,
+	imageLoaded,
 	imagesCache,
 	initialize,
 	linkedImages,
@@ -409,5 +411,44 @@ describe('currentSelectedImages', () => {
 
 		tab.value = 'filtered_out';
 		expect(currentSelectedImages.value).toEqual(['https://example.com/small.png']);
+	});
+
+	it('automatically recomputes matchingImages when images finish loading in imagesCache', () => {
+		const cache = document.createElement('div');
+		const img = document.createElement('img');
+		img.src = 'https://example.com/loading.png';
+		Object.defineProperty(img, 'naturalWidth', { value: 0, writable: true });
+		Object.defineProperty(img, 'naturalHeight', { value: 0, writable: true });
+		cache.append(img);
+		imagesCache.value = cache;
+
+		allImages.value = ['https://example.com/loading.png'];
+		filterMinWidthEnabled.value = true;
+		filterMinWidth.value = 500;
+
+		// Initially not matching because naturalWidth is 0
+		expect(matchingImages.value).toEqual([]);
+
+		// Image finishes loading and onLoad triggers imageLoaded
+		(img as any).naturalWidth = 800;
+		(img as any).naturalHeight = 600;
+		imageLoaded('https://example.com/loading.png');
+
+		// matchingImages MUST update reactively to include the loaded image
+		expect(matchingImages.value).toEqual(['https://example.com/loading.png']);
+	});
+
+	it('uses imageDimensions from tab when filtering without waiting for imagesCache', () => {
+		const cache = document.createElement('div');
+		imagesCache.value = cache;
+
+		imageDimensions.value = {
+			'https://example.com/from-tab.png': { width: 1920, height: 1080 },
+		};
+		allImages.value = ['https://example.com/from-tab.png'];
+		filterMinWidthEnabled.value = true;
+		filterMinWidth.value = 500;
+
+		expect(matchingImages.value).toEqual(['https://example.com/from-tab.png']);
 	});
 });
