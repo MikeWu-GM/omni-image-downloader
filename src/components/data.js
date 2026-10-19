@@ -11,6 +11,7 @@ import {
 import { deduplicateImages } from './deduplicateImages.js';
 import { findImages } from './findImages.js';
 import { readBlobUrls } from './readBlobUrls.js';
+import { getImageExtension } from './useImageStats.js';
 
 // Options
 /** @typedef {typeof defaults} Options */
@@ -18,9 +19,16 @@ export const defaults = {
 	// UI
 	open_mode: 'sidebar',
 	theme: 'light',
+	prototype_variant: 'A', // 'A' | 'B' | 'C'
 	// Filters
 	filter_url: '',
 	filter_url_mode: 'normal',
+	// Size Preset Filters
+	filter_size_preset: 'all', // 'all' | 'large' | 'medium' | 'small' | 'custom'
+	custom_large_threshold: 1200,
+	custom_small_threshold: 400,
+	// Format filter
+	selected_formats: /** @type {string[]} */ ([]),
 	// Advanced filters
 	show_advanced_filters: true,
 	filter_min_width_enabled: false,
@@ -69,6 +77,40 @@ export const filterUrl = storedSignal('filter_url');
 
 export const filterUrlMode = storedSignal('filter_url_mode');
 
+// Size presets
+export const filterSizePreset = storedSignal('filter_size_preset');
+export const customLargeThreshold = storedSignal('custom_large_threshold');
+export const customSmallThreshold = storedSignal('custom_small_threshold');
+
+export const applySizePreset = action((/** @type {'all' | 'large' | 'medium' | 'small' | 'custom'} */ preset) => {
+	batch(() => {
+		filterSizePreset.value = preset;
+		if (preset === 'all') {
+			filterMinWidthEnabled.value = false;
+			filterMaxWidthEnabled.value = false;
+			filterMinHeightEnabled.value = false;
+			filterMaxHeightEnabled.value = false;
+		} else if (preset === 'large') {
+			filterMinWidth.value = customLargeThreshold.value;
+			filterMinWidthEnabled.value = false;
+			filterMaxWidthEnabled.value = false;
+		} else if (preset === 'medium') {
+			filterMinWidth.value = customSmallThreshold.value;
+			filterMaxWidth.value = customLargeThreshold.value;
+			filterMinWidthEnabled.value = false;
+			filterMaxWidthEnabled.value = false;
+		} else if (preset === 'small') {
+			filterMaxWidth.value = customSmallThreshold.value;
+			filterMinWidthEnabled.value = false;
+			filterMaxWidthEnabled.value = false;
+		}
+	});
+});
+
+// Format filter
+/** @type {import('@preact/signals').Signal<string[]>} */
+export const selectedFormats = storedSignal('selected_formats');
+
 // Advanced filters
 export const showAdvancedFilters = storedSignal('show_advanced_filters');
 
@@ -115,6 +157,10 @@ export const initialize = action(async () => {
 		theme: theme,
 		filter_url: filterUrl,
 		filter_url_mode: filterUrlMode,
+		filter_size_preset: filterSizePreset,
+		custom_large_threshold: customLargeThreshold,
+		custom_small_threshold: customSmallThreshold,
+		selected_formats: selectedFormats,
 		show_advanced_filters: showAdvancedFilters,
 		filter_min_width_enabled: filterMinWidthEnabled,
 		filter_max_width_enabled: filterMaxWidthEnabled,
@@ -221,6 +267,24 @@ export const imageErrored = action((/** @type {string | undefined} */ url) => {
 	});
 });
 
+export function normalizeExtension(/** @type {string} */ ext) {
+	if (!ext) return '';
+	const lower = ext.toLowerCase();
+	if (lower === 'jpeg') return 'jpg';
+	return lower;
+}
+
+export const availableFormats = computed(() => {
+	const counts = /** @type {Record<string, number>} */ ({});
+	for (const url of allImages.value) {
+		const ext = normalizeExtension(getImageExtension(url)) || 'other';
+		counts[ext] = (counts[ext] || 0) + 1;
+	}
+	return Object.entries(counts)
+		.map(([format, count]) => ({ format, count }))
+		.sort((a, b) => b.count - a.count);
+});
+
 // Tabs
 export const tab = signal('matching');
 
@@ -273,6 +337,10 @@ export const matchingImages = computed(() => {
 	// Subscribe to imagesLoadedVersion so matchingImages re-evaluates when images finish loading
 	imagesLoadedVersion.value;
 	const currentDimensions = imageDimensions.value;
+	const preset = filterSizePreset.value;
+	const activeFormats = selectedFormats.value;
+	const largeThreshold = customLargeThreshold.value;
+	const smallThreshold = customSmallThreshold.value;
 
 	filtered = filtered.filter((url) => {
 		if (!imagesCache.value) return false;
@@ -287,7 +355,29 @@ export const matchingImages = computed(() => {
 			height = image?.naturalHeight || 0;
 		}
 
+		// Size preset logic
+		let matchesSize = true;
+		if (preset !== 'all' && preset !== 'custom') {
+			const maxDim = Math.max(width, height);
+			if (preset === 'large') {
+				matchesSize = maxDim >= largeThreshold;
+			} else if (preset === 'medium') {
+				matchesSize = maxDim >= smallThreshold && maxDim < largeThreshold;
+			} else if (preset === 'small') {
+				matchesSize = maxDim > 0 && maxDim < smallThreshold;
+			}
+		}
+
+		// Format filter logic
+		let matchesFormat = true;
+		if (activeFormats.length > 0) {
+			const ext = normalizeExtension(getImageExtension(url)) || 'other';
+			matchesFormat = activeFormats.includes(ext);
+		}
+
 		return (
+			matchesSize &&
+			matchesFormat &&
 			// image && <-- we don't want this, it results in overly filtered images on initial load
 			(!filterMinWidthEnabled.value || filterMinWidth.value <= width) &&
 			(!filterMaxWidthEnabled.value || width <= filterMaxWidth.value) &&

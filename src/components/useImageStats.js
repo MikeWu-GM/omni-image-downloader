@@ -105,6 +105,21 @@ export function useImageStats(/** @type {string} */ imageUrl) {
 	};
 }
 
+const KNOWN_EXTENSIONS = new Set([
+	'jpg',
+	'jpeg',
+	'png',
+	'gif',
+	'webp',
+	'avif',
+	'svg',
+	'bmp',
+	'ico',
+	'tiff',
+	'tif',
+	'jfif',
+]);
+
 /** @returns {string} */
 export function getImageExtension(/** @type {string} */ url) {
 	if (!url) return '';
@@ -121,28 +136,49 @@ export function getImageExtension(/** @type {string} */ url) {
 	// Blob URLs have no extension; MIME detection requires fetch
 	if (url.startsWith('blob:')) return '';
 
-	// Extract pathname to avoid matching hostname (e.g. .com)
-	let pathname;
+	// Extract pathname and query
+	let pathname = '';
+	let searchParams = null;
 	try {
-		pathname = new URL(url).pathname;
+		const parsed = new URL(url);
+		pathname = parsed.pathname;
+		searchParams = parsed.searchParams;
 	} catch {
-		pathname = url.split('?')[0].split('#')[0];
+		const parts = url.split('?');
+		pathname = parts[0].split('#')[0];
 	}
 
+	// 1. Direct trailing extension: e.g. /path/to/image.jpg
 	const match = pathname.match(/\.([a-zA-Z0-9]+)$/);
 	if (match) return match[1].toLowerCase();
 
-	// Fallback: check query parameters for format indicators
-	// (e.g., /cdn/image?format=jpg or /image?output=webp)
-	const formatParams = ['format', 'type', 'output', 'ext', 'fmt'];
-	try {
-		const params = new URL(url).searchParams;
+	// 2. Trailing extension followed by CDN pipeline processing symbols: e.g. .webp!thumb, .webp@watermark, .png/strip
+	const pipelineMatch = pathname.match(/\.([a-zA-Z0-9]+)[!@~/]/);
+	if (pipelineMatch && KNOWN_EXTENSIONS.has(pipelineMatch[1].toLowerCase())) {
+		return pipelineMatch[1].toLowerCase();
+	}
+
+	// 3. Cloud image processing format in pathname: e.g. /format,webp or /format/webp
+	const pathFormatMatch = pathname.match(/\/(?:format|fmt)[,/]([a-zA-Z0-9]+)/i);
+	if (pathFormatMatch && KNOWN_EXTENSIONS.has(pathFormatMatch[1].toLowerCase())) {
+		return pathFormatMatch[1].toLowerCase();
+	}
+
+	// 4. Query parameters format indicators: e.g. ?wx_fmt=webp, ?format=jpg, ?f=webp
+	if (searchParams) {
+		const formatParams = ['format', 'type', 'output', 'ext', 'fmt', 'wx_fmt', 'wxfmt', 'f'];
 		for (const param of formatParams) {
-			const value = params.get(param);
+			const value = searchParams.get(param);
 			if (value && /^[a-zA-Z0-9]{2,8}$/.test(value)) return value.toLowerCase();
 		}
-	} catch {
-		// Not a parseable URL
+
+		// Also check query param values containing cloud format transformations (e.g. x-oss-process=image/format,webp)
+		for (const [, val] of searchParams.entries()) {
+			const ossMatch = val.match(/(?:format|fmt)[,/]([a-zA-Z0-9]+)/i);
+			if (ossMatch && KNOWN_EXTENSIONS.has(ossMatch[1].toLowerCase())) {
+				return ossMatch[1].toLowerCase();
+			}
+		}
 	}
 
 	return '';

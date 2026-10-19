@@ -14,6 +14,7 @@ import {
 	filterMinHeightEnabled,
 	filterMinWidth,
 	filterMinWidthEnabled,
+	filterSizePreset,
 	hideErroredImages,
 	onlyImagesFromLinks,
 	onlyUniqueImages,
@@ -148,15 +149,14 @@ export function AdvancedFilters() {
 
 function useSlider(/** @type {'width' | 'height'} */ dimension) {
 	const sliderRef = useRef(/** @type {HTMLElement | null} */ (null));
+	const minDefault = dimension === 'width' ? defaults.filter_min_width : defaults.filter_min_height;
+	const maxDefault = dimension === 'width' ? defaults.filter_max_width : defaults.filter_max_height;
+	const minSignal = dimension === 'width' ? filterMinWidth : filterMinHeight;
+	const maxSignal = dimension === 'width' ? filterMaxWidth : filterMaxHeight;
 
 	useEffect(() => {
 		const slider = /** @type {import('nouislider').target | null} */ (sliderRef.current);
 		if (!slider) return;
-
-		const minDefault = dimension === 'width' ? defaults.filter_min_width : defaults.filter_min_height;
-		const maxDefault = dimension === 'width' ? defaults.filter_max_width : defaults.filter_max_height;
-		const minSignal = dimension === 'width' ? filterMinWidth : filterMinHeight;
-		const maxSignal = dimension === 'width' ? filterMaxWidth : filterMaxHeight;
 
 		noUiSlider.create(slider, {
 			behaviour: 'extend-tap',
@@ -178,12 +178,28 @@ function useSlider(/** @type {'width' | 'height'} */ dimension) {
 			maxSignal.value = /** @type {number} */ (max);
 		});
 
+		slider.noUiSlider?.on('slide', () => {
+			filterSizePreset.value = 'custom';
+		});
+
 		return () => {
 			if (slider.noUiSlider) {
 				slider.noUiSlider.destroy();
 			}
 		};
 	}, [dimension]);
+
+	useEffect(() => {
+		const slider = /** @type {import('nouislider').target | null} */ (sliderRef.current);
+		if (!slider?.noUiSlider) return;
+		const current = slider.noUiSlider.get(true);
+		if (Array.isArray(current)) {
+			const [curMin, curMax] = current;
+			if (curMin !== minSignal.value || curMax !== maxSignal.value) {
+				slider.noUiSlider.set([minSignal.value, maxSignal.value]);
+			}
+		}
+	}, [minSignal.value, maxSignal.value]);
 
 	useEffect(() => {
 		const slider = sliderRef.current;

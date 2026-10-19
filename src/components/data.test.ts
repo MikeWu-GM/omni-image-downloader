@@ -5,16 +5,21 @@ mockDOM();
 
 import {
 	allImages,
+	applySizePreset,
 	columns,
 	currentSelectedImages,
+	customLargeThreshold,
+	customSmallThreshold,
 	filterMaxHeight,
 	filterMaxHeightEnabled,
 	filterMaxWidth,
 	filterMaxWidthEnabled,
 	filterMinHeight,
+	availableFormats,
 	filterMinHeightEnabled,
 	filterMinWidth,
 	filterMinWidthEnabled,
+	filterSizePreset,
 	filterUrl,
 	filterUrlMode,
 	folderName,
@@ -30,6 +35,7 @@ import {
 	openMode,
 	reloadImagesWhenPageLoads,
 	scriptError,
+	selectedFormats,
 	selectedImages,
 	setLockedTabId,
 	showAdvancedFilters,
@@ -450,5 +456,123 @@ describe('currentSelectedImages', () => {
 		filterMinWidth.value = 500;
 
 		expect(matchingImages.value).toEqual(['https://example.com/from-tab.png']);
+	});
+
+	it('filters images by size presets (large, medium, small)', () => {
+		const cache = document.createElement('div');
+		imagesCache.value = cache;
+
+		imageDimensions.value = {
+			'https://example.com/large.png': { width: 1920, height: 1080 },
+			'https://example.com/medium.jpg': { width: 800, height: 600 },
+			'https://example.com/small.png': { width: 200, height: 200 },
+		};
+		allImages.value = [
+			'https://example.com/large.png',
+			'https://example.com/medium.jpg',
+			'https://example.com/small.png',
+		];
+		filterMinWidthEnabled.value = false;
+		filterMaxWidthEnabled.value = false;
+
+		// Large: >= 1200
+		filterSizePreset.value = 'large';
+		expect(matchingImages.value).toEqual(['https://example.com/large.png']);
+
+		// Medium: 400 <= size < 1200
+		filterSizePreset.value = 'medium';
+		expect(matchingImages.value).toEqual(['https://example.com/medium.jpg']);
+
+		// Small: < 400
+		filterSizePreset.value = 'small';
+		expect(matchingImages.value).toEqual(['https://example.com/small.png']);
+
+		// All
+		filterSizePreset.value = 'all';
+		expect(matchingImages.value).toHaveLength(3);
+	});
+
+	it('filters images by dynamic format selection and counts available formats', () => {
+		const cache = document.createElement('div');
+		imagesCache.value = cache;
+		allImages.value = [
+			'https://example.com/1.png',
+			'https://example.com/2.png',
+			'https://example.com/3.jpg',
+			'https://example.com/4.webp',
+		];
+		filterSizePreset.value = 'all';
+
+		expect(availableFormats.value).toEqual([
+			{ format: 'png', count: 2 },
+			{ format: 'jpg', count: 1 },
+			{ format: 'webp', count: 1 },
+		]);
+
+		selectedFormats.value = ['png'];
+		expect(matchingImages.value).toEqual(['https://example.com/1.png', 'https://example.com/2.png']);
+
+		selectedFormats.value = ['jpg', 'webp'];
+		expect(matchingImages.value).toEqual(['https://example.com/3.jpg', 'https://example.com/4.webp']);
+
+		selectedFormats.value = [];
+		expect(matchingImages.value).toHaveLength(4);
+
+		// Add complex CDN WebP URLs
+		allImages.value = [
+			'https://mmbiz.qpic.cn/sz_mmbiz_png/xxx/640?wx_fmt=webp',
+			'http://example.com/photo.webp!thumbnail',
+			'http://example.com/regular.png',
+		];
+		expect(availableFormats.value).toEqual([
+			{ format: 'webp', count: 2 },
+			{ format: 'png', count: 1 },
+		]);
+	});
+
+	it('supports applySizePreset and dynamic custom threshold changes', () => {
+		const cache = document.createElement('div');
+		imagesCache.value = cache;
+		allImages.value = [
+			'https://example.com/large.jpg',
+			'https://example.com/medium.jpg',
+			'https://example.com/small.jpg',
+		];
+		imageDimensions.value = {
+			'https://example.com/large.jpg': { width: 1400, height: 900 },
+			'https://example.com/medium.jpg': { width: 800, height: 600 },
+			'https://example.com/small.jpg': { width: 200, height: 200 },
+		};
+
+		// 1. Select Large Preset
+		applySizePreset('large');
+		expect(filterSizePreset.value).toBe('large');
+		expect(filterMinWidth.value).toBe(customLargeThreshold.value);
+		expect(matchingImages.value).toEqual(['https://example.com/large.jpg']);
+
+		// 2. Adjust Large Threshold dynamically from 1200 down to 700
+		customLargeThreshold.value = 700;
+		expect(matchingImages.value).toEqual(['https://example.com/large.jpg', 'https://example.com/medium.jpg']);
+
+		// 3. Select Small Preset
+		applySizePreset('small');
+		expect(filterSizePreset.value).toBe('small');
+		expect(filterMaxWidth.value).toBe(customSmallThreshold.value);
+		expect(matchingImages.value).toEqual(['https://example.com/small.jpg']);
+
+		// 4. Select Medium Preset (with large threshold restored to 1200)
+		customLargeThreshold.value = 1200;
+		applySizePreset('medium');
+		expect(filterSizePreset.value).toBe('medium');
+		expect(filterMinWidth.value).toBe(customSmallThreshold.value);
+		expect(filterMaxWidth.value).toBe(customLargeThreshold.value);
+		expect(matchingImages.value).toEqual(['https://example.com/medium.jpg']);
+
+		// 5. Reset to All
+		applySizePreset('all');
+		expect(filterSizePreset.value).toBe('all');
+		expect(filterMinWidthEnabled.value).toBe(false);
+		expect(filterMaxWidthEnabled.value).toBe(false);
+		expect(matchingImages.value).toHaveLength(3);
 	});
 });

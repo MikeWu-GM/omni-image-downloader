@@ -1,23 +1,9 @@
 // @ts-check
 import html, { For, Show, useComputed, useSignal } from '../html.js';
 
-import { getReferralUrl, isIncludedIn, isNotIncludedIn, isNotStrictEqual, stopPropagation, unique } from '../utils.js';
+import { getReferralUrl, isNotStrictEqual, stopPropagation } from '../utils.js';
 import * as actions from './actions.js';
-import { Checkbox } from './Checkbox.js';
-import {
-	columns,
-	currentSelectedImages,
-	displayedImages,
-	filteredOutImages,
-	imageErrored,
-	imageLoaded,
-	matchingImages,
-	selectedFilteredOutImages,
-	selectedImages,
-	selectedMatchingImages,
-	tab,
-	theme,
-} from './data.js';
+import { columns, displayedImages, imageErrored, imageLoaded, selectedImages } from './data.js';
 import { ExternalLink } from './ExternalLink.js';
 import { useImageStats } from './useImageStats.js';
 import { useScrollToEnd } from './useScrollToEnd.js';
@@ -45,117 +31,10 @@ import { useScrollToEnd } from './useScrollToEnd.js';
  * @property {CSSProperties} [style]
  */
 
-export function Images(/** @type {ImagesProps} */ { class: className, style, ...props }) {
-	const allImagesFromCurrentTabAreSelected =
-		displayedImages.value.length > 0 && displayedImages.value.every(isIncludedIn(selectedImages.value));
-
-	const themeTooltip = {
-		system: 'Using your system theme',
-		dark: 'Using dark theme',
-		light: 'Using light theme',
-	}[theme.value];
-
-	const themeIcon = {
-		system: '/images/system.svg',
-		dark: '/images/moon.svg',
-		light: '/images/sun.svg',
-	}[theme.value];
-
+export function Images(/** @type {ImagesProps} */ { class: className = '', style, ...props }) {
 	return html`
-		<div class="flex flex-wrap items-start gap-2 p-2 pb-0 tabular-nums">
-			<ul
-				class="flex items-center overflow-hidden rounded-full border border-slate-300 text-xs text-nowrap dark:border-slate-600"
-				onChange=${(/** @type {Event} */ e) => {
-					tab.value = /** @type {HTMLInputElement} */ (e.target).value;
-				}}
-			>
-				<li>
-					<${Tab}
-						title="Images matching your filters"
-						input=${{ name: 'visibility', value: 'matching', checked: tab.value === 'matching' }}
-					>
-						<${Circle} class="bg-green-600 text-white">
-							${
-								selectedMatchingImages.value.length > 0
-									? html`<span class="text-2xs">${selectedMatchingImages.value.length}</span>`
-									: '+'
-							}
-						<//>
-						${matchingImages.value.length} matching
-					<//>
-				</li>
-
-				<li>
-					<${Tab}
-						class="border-l border-slate-300 dark:border-slate-600"
-						title="Images removed by your filters"
-						input=${{ name: 'visibility', value: 'filtered_out', checked: tab.value === 'filtered_out' }}
-					>
-						<${Circle} class="bg-slate-600 text-white">
-							${
-								selectedFilteredOutImages.value.length > 0
-									? html`<span class="text-2xs">${selectedFilteredOutImages.value.length}</span>`
-									: '-'
-							}
-						<//>
-						${filteredOutImages.value.length} filtered out
-					<//>
-				</li>
-			</ul>
-
-			<${Checkbox}
-				class="flex items-center gap-1 rounded-full border border-slate-300 bg-slate-50 p-1 text-xs text-nowrap text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-				checked=${allImagesFromCurrentTabAreSelected}
-				indeterminate=${currentSelectedImages.value.length > 0 && !allImagesFromCurrentTabAreSelected}
-				disabled=${displayedImages.value.length === 0}
-				title="Click to select or unselect all displayed images"
-				onChange=${(/** @type {Event} */ e) => {
-					const { checked } = /** @type {HTMLInputElement} */ (e.currentTarget);
-					selectedImages.value = checked
-						? unique([...selectedImages.value, ...displayedImages.value])
-						: selectedImages.value.filter(isNotIncludedIn(displayedImages.value));
-				}}
-			>
-				${currentSelectedImages.value.length} selected
-			<//>
-
-			<div class="mt-px ml-auto flex items-center gap-1.5 text-xs">
-				<div class="flex items-baseline gap-1 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700">
-					<button
-						type="button"
-						class="size-6 rounded-none font-bold"
-						aria-label="Fewer columns"
-						onClick=${() => (columns.value = Math.max(1, columns.value - 1))}
-					>
-						-
-					</button>
-
-					<span title="Number of columns">${columns}</span>
-
-					<button
-						type="button"
-						class="size-6 rounded-none font-bold"
-						aria-label="More columns"
-						onClick=${() => (columns.value = Math.min(columns.value + 1, 6))}
-					>
-						+
-					</button>
-				</div>
-
-				<button
-					class="size-6.5"
-					title=${`${themeTooltip} (click to cycle)`}
-					onClick=${() => {
-						theme.value = theme.value === 'system' ? 'light' : theme.value === 'light' ? 'dark' : 'system';
-					}}
-				>
-					<img class="inline w-4" src=${themeIcon} />
-				</button>
-			</div>
-		</div>
-
 		<div
-			class="grid gap-2 p-2"
+			class="${className} grid gap-2 p-2"
 			style=${{ gridTemplateColumns: `repeat(${columns.value}, minmax(0, 1fr))`, ...style }}
 			...${props}
 		>
@@ -173,36 +52,6 @@ export function Images(/** @type {ImagesProps} */ { class: className, style, ...
 				`}
 			<//>
 		</div>
-	`;
-}
-
-function Tab(
-	/** @type {{ class?: string, children?: any, input?: { name: string, value: string, checked: boolean } }} */ {
-		class: className = '',
-		children,
-		input,
-		...props
-	}
-) {
-	return html`
-		<label
-			class="${className} bg-slate-50 p-1 text-slate-600 transition-colors hover:bg-slate-100 has-checked:bg-slate-200 has-checked:text-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:has-checked:bg-slate-700 dark:has-checked:text-slate-200"
-			...${props}
-		>
-			<input class="sr-only" type="radio" ...${input} />
-			${children}
-		</label>
-	`;
-}
-
-function Circle(/** @type {{ class?: string, children?: any }} */ { class: className = '', children, ...props }) {
-	return html`
-		<span
-			class="corner-round ${className} inline-block h-4 min-w-4 rounded-full px-1 text-center font-bold"
-			...${props}
-		>
-			${children}
-		</span>
 	`;
 }
 
@@ -300,6 +149,17 @@ function ImageError(/** @type {{ onClick?: (e: MouseEvent) => void }} */ { onCli
 			<div><${Circle} class="bg-red-600 text-white">×<//> Error loading image</div>
 			Click to retry
 		</button>
+	`;
+}
+
+function Circle(/** @type {{ class?: string, children?: any }} */ { class: className = '', children, ...props }) {
+	return html`
+		<span
+			class="corner-round ${className} inline-block h-4 min-w-4 rounded-full px-1 text-center font-bold"
+			...${props}
+		>
+			${children}
+		</span>
 	`;
 }
 

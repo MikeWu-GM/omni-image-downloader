@@ -152,6 +152,16 @@ describe('getImageExtension', () => {
 		expect(getImageExtension('http://example.com/image?format=png_bak')).toBe('');
 		expect(getImageExtension('http://example.com/image?output=jpg_old')).toBe('');
 	});
+
+	it('extracts webp and modern formats from complex CDN URLs and pipelines', () => {
+		expect(getImageExtension('https://mmbiz.qpic.cn/sz_mmbiz_png/xxx/640?wx_fmt=webp')).toBe('webp');
+		expect(getImageExtension('https://mmbiz.qpic.cn/sz_mmbiz_png/xxx/640?wx_fmt=png')).toBe('png');
+		expect(getImageExtension('http://cdn.example.com/images/abc123?f=webp')).toBe('webp');
+		expect(getImageExtension('http://example.com/photo.webp!thumbnail')).toBe('webp');
+		expect(getImageExtension('http://example.com/photo.webp@watermark')).toBe('webp');
+		expect(getImageExtension('http://example.com/image/format,webp/resize,w_800')).toBe('webp');
+		expect(getImageExtension('http://example.com/image?x-oss-process=image/format,webp')).toBe('webp');
+	});
 });
 
 describe('getImageResourceSize', () => {
