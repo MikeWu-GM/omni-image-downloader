@@ -32,6 +32,7 @@ import {
 	loadImagesFromActiveTab,
 	matchingImages,
 	newFileName,
+	normalizeExtension,
 	openMode,
 	reloadImagesWhenPageLoads,
 	scriptError,
@@ -41,6 +42,8 @@ import {
 	showAdvancedFilters,
 	showDownloadConfirmation,
 	tab,
+	detectedImageExtensions,
+	updateDetectedExtension,
 } from './data.js';
 
 let localStorageData: Record<string, string>;
@@ -85,6 +88,9 @@ beforeEach(() => {
 	filterMinHeight.value = 0;
 	filterMaxHeight.value = 3000;
 	selectedImages.value = [];
+	selectedFormats.value = [];
+	detectedImageExtensions.value = {};
+	filterSizePreset.value = 'all';
 	columns.value = 2;
 	folderName.value = '';
 	newFileName.value = '';
@@ -528,6 +534,41 @@ describe('currentSelectedImages', () => {
 			{ format: 'webp', count: 2 },
 			{ format: 'png', count: 1 },
 		]);
+	});
+
+	it('normalizes common image extension variants (jpeg, jfif, tiff, x-icon)', () => {
+		expect(normalizeExtension('jpeg')).toBe('jpg');
+		expect(normalizeExtension('jfif')).toBe('jpg');
+		expect(normalizeExtension('tiff')).toBe('tif');
+		expect(normalizeExtension('tif')).toBe('tif');
+		expect(normalizeExtension('x-icon')).toBe('ico');
+		expect(normalizeExtension('png')).toBe('png');
+	});
+
+	it('reactively updates availableFormats and matchingImages when dynamic extension is detected via updateDetectedExtension', () => {
+		const cache = document.createElement('div');
+		imagesCache.value = cache;
+		const dynamicUrl = 'https://example.com/image/dynamic_raw_id_888';
+		allImages.value = [dynamicUrl];
+		detectedImageExtensions.value = {};
+		selectedFormats.value = [];
+
+		// Initially without detected extension, it should fall back to 'other'
+		expect(availableFormats.value).toEqual([{ format: 'other', count: 1 }]);
+
+		// Asynchronous detection resolves extension as webp
+		updateDetectedExtension(dynamicUrl, 'webp');
+
+		// availableFormats must immediately reflect webp instead of other
+		expect(availableFormats.value).toEqual([{ format: 'webp', count: 1 }]);
+
+		// Filtering by webp must match the dynamic image
+		selectedFormats.value = ['webp'];
+		expect(matchingImages.value).toEqual([dynamicUrl]);
+
+		// Filtering by png must not match
+		selectedFormats.value = ['png'];
+		expect(matchingImages.value).toEqual([]);
 	});
 
 	it('supports applySizePreset and dynamic custom threshold changes', () => {

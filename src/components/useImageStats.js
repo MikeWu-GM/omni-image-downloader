@@ -29,9 +29,20 @@ import { useSignal } from '../html.js';
 const cache = new Map();
 const MAX_CACHE_SIZE = 500;
 
+/**
+ * @typedef {(url: string, extension: string) => void} OnExtensionDetected
+ */
+
 /** @returns {ImageStats} */
-export function useImageStats(/** @type {string} */ imageUrl) {
+export function useImageStats(
+	/** @type {string} */ imageUrl,
+	/** @type {OnExtensionDetected | undefined} */ onExtensionDetected = undefined
+) {
 	const cached = cache.get(imageUrl);
+
+	if (cached?.extension && onExtensionDetected) {
+		onExtensionDetected(imageUrl, cached.extension);
+	}
 
 	/** @type {{ value: ImageStatsData }} */
 	const data = useSignal(
@@ -65,12 +76,17 @@ export function useImageStats(/** @type {string} */ imageUrl) {
 		cache.set(url, loaded);
 		data.value = loaded;
 
+		if (urlExtension && onExtensionDetected) {
+			onExtensionDetected(url, urlExtension);
+		}
+
 		// Refine extension via fetch if URL parsing was inconclusive
 		if (!urlExtension) {
 			fetchImageExtension(url).then((extension) => {
 				if (extension) {
 					data.value = { ...data.value, extension };
 					cache.set(url, data.value);
+					onExtensionDetected?.(url, extension);
 				}
 			});
 		}
@@ -105,7 +121,7 @@ export function useImageStats(/** @type {string} */ imageUrl) {
 	};
 }
 
-const KNOWN_EXTENSIONS = new Set([
+export const KNOWN_EXTENSIONS = new Set([
 	'jpg',
 	'jpeg',
 	'png',
@@ -118,6 +134,8 @@ const KNOWN_EXTENSIONS = new Set([
 	'tiff',
 	'tif',
 	'jfif',
+	'cur',
+	'apng',
 ]);
 
 /** @returns {string} */
@@ -138,19 +156,27 @@ export function getImageExtension(/** @type {string} */ url) {
 
 	// Extract pathname and query
 	let pathname = '';
-	let searchParams = null;
+	let searchParams = /** @type {URLSearchParams | null} */ (null);
 	try {
 		const parsed = new URL(url);
 		pathname = parsed.pathname;
 		searchParams = parsed.searchParams;
 	} catch {
-		const parts = url.split('?');
-		pathname = parts[0].split('#')[0];
+		try {
+			const parsed = new URL(url, 'https://placeholder.internal');
+			pathname = parsed.pathname;
+			searchParams = parsed.searchParams;
+		} catch {
+			const parts = url.split('?');
+			pathname = parts[0].split('#')[0];
+		}
 	}
 
-	// 1. Direct trailing extension: e.g. /path/to/image.jpg
+	// 1. Direct trailing extension: e.g. /path/to/image.jpg (must match KNOWN_EXTENSIONS)
 	const match = pathname.match(/\.([a-zA-Z0-9]+)$/);
-	if (match) return match[1].toLowerCase();
+	if (match && KNOWN_EXTENSIONS.has(match[1].toLowerCase())) {
+		return match[1].toLowerCase();
+	}
 
 	// 2. Trailing extension followed by CDN pipeline processing symbols: e.g. .webp!thumb, .webp@watermark, .png/strip
 	const pipelineMatch = pathname.match(/\.([a-zA-Z0-9]+)[!@~/]/);
@@ -168,8 +194,10 @@ export function getImageExtension(/** @type {string} */ url) {
 	if (searchParams) {
 		const formatParams = ['format', 'type', 'output', 'ext', 'fmt', 'wx_fmt', 'wxfmt', 'f'];
 		for (const param of formatParams) {
-			const value = searchParams.get(param);
-			if (value && /^[a-zA-Z0-9]{2,8}$/.test(value)) return value.toLowerCase();
+			const value = searchParams.get(param)?.toLowerCase();
+			if (value && (KNOWN_EXTENSIONS.has(value) || value === 'jpeg')) {
+				return value;
+			}
 		}
 
 		// Also check query param values containing cloud format transformations (e.g. x-oss-process=image/format,webp)

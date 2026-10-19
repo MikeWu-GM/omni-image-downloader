@@ -1,5 +1,7 @@
 // @ts-check
 import { findImageBySrc, unique } from '../utils.js';
+import { normalizeExtension } from './data.js';
+import { getImageExtension } from './useImageStats.js';
 
 const priorities = ['png', 'jpg', 'jpeg', 'bmp', 'webp', 'avif'];
 
@@ -51,17 +53,21 @@ function getNormalizedBaseKey(/** @type {string} */ url) {
 	try {
 		const parsed = new URL(url);
 
-		const parts = parsed.pathname.split('.');
-		const nameWithoutExtension =
-			parts.length > 1 && priorities.includes(/** @type {string} */ (parts.at(-1)))
-				? parts.slice(0, -1).join('.')
-				: parsed.pathname;
+		const rawExt = getImageExtension(url);
+		const normalizedExt = normalizeExtension(rawExt);
+		let cleanPathname = parsed.pathname;
+
+		if (rawExt && (priorities.includes(rawExt) || priorities.includes(normalizedExt))) {
+			cleanPathname = cleanPathname.replace(new RegExp(`\\.${rawExt}(?:[!@~/].*)?$`, 'i'), '');
+		} else {
+			const parts = cleanPathname.split('.');
+			if (parts.length > 1 && priorities.includes(/** @type {string} */ (parts.at(-1)))) {
+				cleanPathname = parts.slice(0, -1).join('.');
+			}
+		}
 
 		// Get base name without resolution suffixes
-		const basename = nameWithoutExtension.replace(
-			/(?:[-_](?:\d{2,4}x\d{2,4}|\d{2,4}w)|@\d+x|@._V1_(FMjpg_UY\d+_?)?)$/i,
-			''
-		);
+		const basename = cleanPathname.replace(/(?:[-_](?:\d{2,4}x\d{2,4}|\d{2,4}w)|@\d+x|@._V1_(FMjpg_UY\d+_?)?)$/i, '');
 
 		// Extract identifier: look for hash-like pattern at end (e.g., 7qulxnmlw8sg1 from longer names).
 		// Shorter names like photo01 recur across folders for different images.
@@ -174,5 +180,9 @@ function pickBestImageUrl(urlStrings, imagesCache, imageDimensions = {}) {
 }
 
 function getExtension(/** @type {URL} */ url) {
+	const raw = getImageExtension(url.href);
+	if (priorities.includes(raw)) return raw;
+	const norm = normalizeExtension(raw);
+	if (priorities.includes(norm)) return norm;
 	return /** @type {string} */ (url.pathname.split('.').at(-1)).toLowerCase();
 }

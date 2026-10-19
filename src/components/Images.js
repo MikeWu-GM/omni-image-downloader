@@ -3,7 +3,15 @@ import html, { For, Show, useComputed, useSignal } from '../html.js';
 
 import { getReferralUrl, isNotStrictEqual, stopPropagation } from '../utils.js';
 import * as actions from './actions.js';
-import { columns, displayedImages, imageErrored, imageLoaded, selectedImages } from './data.js';
+import {
+	columns,
+	displayedImages,
+	imageErrored,
+	imageLoaded,
+	normalizeExtension,
+	selectedImages,
+	updateDetectedExtension,
+} from './data.js';
 import { ExternalLink } from './ExternalLink.js';
 import { useImageStats } from './useImageStats.js';
 import { useScrollToEnd } from './useScrollToEnd.js';
@@ -56,7 +64,7 @@ export function Images(/** @type {ImagesProps} */ { class: className = '', style
 }
 
 function ImageCard(/** @type {{ imageUrl: string }} */ { imageUrl, ...props }) {
-	const stats = useImageStats(imageUrl);
+	const stats = useImageStats(imageUrl, updateDetectedExtension);
 	const statsAreLoaded = useComputed(() => stats.data.value.status === 'loaded');
 	const retryCount = useSignal(0);
 	const isSelected = selectedImages.value.includes(imageUrl);
@@ -122,7 +130,7 @@ function ImageCard(/** @type {{ imageUrl: string }} */ { imageUrl, ...props }) {
 				<${ImageUrlTextbox} class="opacity-0 group-hover:opacity-100 w-full" url=${imageUrl} />
 
 				<div class="group-hover:hidden flex gap-1">
-					<${ImageStat} class="uppercase">${stats.data.value.extension}</${ImageStat}>
+					<${ImageStat} class="uppercase">${normalizeExtension(stats.data.value.extension)}</${ImageStat}>
 
 					<${Show} when=${statsAreLoaded}>
 						<${ImageStat}>${stats.data.value.width}×${stats.data.value.height}</${ImageStat}>

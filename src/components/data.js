@@ -270,14 +270,33 @@ export const imageErrored = action((/** @type {string | undefined} */ url) => {
 export function normalizeExtension(/** @type {string} */ ext) {
 	if (!ext) return '';
 	const lower = ext.toLowerCase();
-	if (lower === 'jpeg') return 'jpg';
+	if (lower === 'jpeg' || lower === 'jfif') return 'jpg';
+	if (lower === 'tiff') return 'tif';
+	if (lower === 'x-icon') return 'ico';
 	return lower;
 }
 
+/** @type {import('@preact/signals').Signal<Record<string, string>>} */
+export const detectedImageExtensions = signal({});
+
+export const updateDetectedExtension = action((/** @type {string} */ url, /** @type {string} */ ext) => {
+	if (!url || !ext) return;
+	const normalized = normalizeExtension(ext);
+	if (!normalized) return;
+	const current = detectedImageExtensions.peek();
+	if (current[url] === normalized) return;
+	detectedImageExtensions.value = {
+		...current,
+		[url]: normalized,
+	};
+});
+
 export const availableFormats = computed(() => {
 	const counts = /** @type {Record<string, number>} */ ({});
+	const detected = detectedImageExtensions.value;
 	for (const url of allImages.value) {
-		const ext = normalizeExtension(getImageExtension(url)) || 'other';
+		const rawExt = detected[url] || getImageExtension(url);
+		const ext = normalizeExtension(rawExt) || 'other';
 		counts[ext] = (counts[ext] || 0) + 1;
 	}
 	return Object.entries(counts)
@@ -371,7 +390,9 @@ export const matchingImages = computed(() => {
 		// Format filter logic
 		let matchesFormat = true;
 		if (activeFormats.length > 0) {
-			const ext = normalizeExtension(getImageExtension(url)) || 'other';
+			const detected = detectedImageExtensions.value;
+			const rawExt = detected[url] || getImageExtension(url);
+			const ext = normalizeExtension(rawExt) || 'other';
 			matchesFormat = activeFormats.includes(ext);
 		}
 
@@ -465,6 +486,15 @@ function executeOnTab(
 				// Use `allImages` to preserve original DOM order.
 				erroredImages.value = allImages.value.filter(isIncludedIn(erroredImages.value));
 				selectedImages.value = allImages.value.filter(isIncludedIn(selectedImages.value));
+
+				// Reset detected extensions and prune invalid formats that do not exist on the new page
+				detectedImageExtensions.value = {};
+				if (selectedFormats.value.length > 0) {
+					const currentFormats = new Set(
+						allImages.value.map((url) => normalizeExtension(getImageExtension(url)) || 'other')
+					);
+					selectedFormats.value = selectedFormats.value.filter((fmt) => currentFormats.has(fmt));
+				}
 
 				for (const message of messages) {
 					if (message.result?.origin) {

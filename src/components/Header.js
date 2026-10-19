@@ -326,14 +326,20 @@ export function Header(/** @type {Object} */ props) {
 									? 'border-emerald-600 bg-emerald-600 text-white'
 									: 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
 							} flex items-center gap-1 rounded border px-2 py-1 font-medium transition-colors"
-							title="Filter by detected image formats"
+							title=${
+								selectedFormats.value.length > 0
+									? `已选类型: ${selectedFormats.value.join(', ').toUpperCase()}`
+									: '按检测到的图片类型筛选'
+							}
 							onClick=${toggle(showFormatMenu)}
 						>
 							<span>
 								${
-									selectedFormats.value.length > 0
-										? `类型: ${selectedFormats.value.join(',').toUpperCase()}`
-										: '类型: 全部'
+									selectedFormats.value.length === 0
+										? '类型: 全部'
+										: selectedFormats.value.length === 1
+											? `类型: ${selectedFormats.value[0].toUpperCase()}`
+											: `类型: (${selectedFormats.value.length})`
 								}
 							</span>
 							<span class="text-3xs">▾</span>
@@ -354,21 +360,29 @@ export function Header(/** @type {Object} */ props) {
 
 								<div class="my-0.5 border-t border-slate-200 dark:border-slate-700"></div>
 
-								${availableFormats.value.map(
-									({ format, count }) => html`
-										<button
-											key=${format}
-											type="button"
-											class="${
-												isFormatSelected(format) ? 'font-bold text-emerald-600 dark:text-emerald-400' : ''
-											} flex items-center justify-between rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-700"
-											onClick=${() => toggleFormat(format)}
-										>
-											<span class="uppercase">${format}</span>
-											<span class="text-3xs text-slate-400">(${count})</span>
-										</button>
-									`
-								)}
+								${(() => {
+									const existingFormats = new Set(availableFormats.value.map((f) => f.format));
+									const orphanedFormats = selectedFormats.value.filter((fmt) => !existingFormats.has(fmt));
+									const allItems = [
+										...availableFormats.value,
+										...orphanedFormats.map((fmt) => ({ format: fmt, count: 0 })),
+									];
+									return allItems.map(
+										({ format, count }) => html`
+											<button
+												key=${format}
+												type="button"
+												class="${
+													isFormatSelected(format) ? 'font-bold text-emerald-600 dark:text-emerald-400' : ''
+												} flex items-center justify-between rounded px-2 py-1 hover:bg-slate-100 dark:hover:bg-slate-700"
+												onClick=${() => toggleFormat(format)}
+											>
+												<span class="uppercase">${format}</span>
+												<span class="text-3xs text-slate-400">(${count})</span>
+											</button>
+										`
+									);
+								})()}
 							</div>
 						<//>
 					</div>

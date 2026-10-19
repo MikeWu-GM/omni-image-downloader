@@ -51,6 +51,23 @@ describe('useImageStats', () => {
 		const result = await testHook(() => useImageStats('http://example.com/test.jpg'));
 		expect(typeof result.reset).toBe('function');
 	});
+
+	it('invokes onExtensionDetected callback when extension is resolved or loaded', async () => {
+		let detectedUrl = '';
+		let detectedExt = '';
+		const callback = (url: string, ext: string) => {
+			detectedUrl = url;
+			detectedExt = ext;
+		};
+		const result = await testHook(() => useImageStats('http://example.com/logo.png', callback));
+
+		const img = document.createElement('img');
+		img.src = 'http://example.com/logo.png';
+		result.onLoad({ currentTarget: img } as any);
+
+		expect(detectedUrl).toBe('http://example.com/logo.png');
+		expect(detectedExt).toBe('png');
+	});
 });
 
 describe('getImageExtension', () => {
@@ -161,6 +178,25 @@ describe('getImageExtension', () => {
 		expect(getImageExtension('http://example.com/photo.webp@watermark')).toBe('webp');
 		expect(getImageExtension('http://example.com/image/format,webp/resize,w_800')).toBe('webp');
 		expect(getImageExtension('http://example.com/image?x-oss-process=image/format,webp')).toBe('webp');
+	});
+
+	it('rejects non-image extensions in pathname and query parameters', () => {
+		// Non-image scripts and paths should return empty string
+		expect(getImageExtension('https://example.com/avatar.php')).toBe('');
+		expect(getImageExtension('https://example.com/download.action')).toBe('');
+		expect(getImageExtension('https://example.com/verify.do')).toBe('');
+		expect(getImageExtension('https://example.com/api/v1.0/image')).toBe('');
+
+		// Non-image query parameters should not be treated as formats
+		expect(getImageExtension('https://example.com/image?type=cover')).toBe('');
+		expect(getImageExtension('https://example.com/image?type=avatar')).toBe('');
+		expect(getImageExtension('https://example.com/image?f=auto')).toBe('');
+		expect(getImageExtension('https://example.com/image?format=square')).toBe('');
+	});
+
+	it('handles protocol-relative URLs with query parameter formats', () => {
+		expect(getImageExtension('//cdn.example.com/image?format=webp')).toBe('webp');
+		expect(getImageExtension('//cdn.example.com/image?wx_fmt=png')).toBe('png');
 	});
 });
 

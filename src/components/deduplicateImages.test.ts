@@ -282,4 +282,14 @@ describe('deduplicateImages', () => {
 		];
 		expect(deduplicateImages(urls, createCache(images))).toEqual(urls);
 	});
+
+	it('correctly compares format priorities for modern CDN URLs with pipeline and query format params', () => {
+		const testImages = {
+			'https://example.com/banner.webp!large': { naturalWidth: 800, naturalHeight: 600 },
+			'https://example.com/banner.png': { naturalWidth: 800, naturalHeight: 600 },
+		};
+		// PNG should be preferred over WebP for the exact same resolution and base name
+		const urls = ['https://example.com/banner.webp!large', 'https://example.com/banner.png'];
+		expect(deduplicateImages(urls, createCache(testImages))).toEqual(['https://example.com/banner.png']);
+	});
 });
