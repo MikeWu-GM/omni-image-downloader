@@ -2,7 +2,13 @@ import { describe, expect, it } from 'bun:test';
 import { h, render } from 'preact';
 import { mockDOM } from '../test-helpers';
 
-import { formatFileSize, getImageExtension, getImageResourceSize, useImageStats } from './useImageStats.js';
+import {
+	fetchImageExtension,
+	formatFileSize,
+	getImageExtension,
+	getImageResourceSize,
+	useImageStats,
+} from './useImageStats.js';
 
 mockDOM();
 
@@ -321,5 +327,78 @@ describe('formatFileSize', () => {
 
 	it('formats gigabytes', () => {
 		expect(formatFileSize(1073741824)).toBe('1GB');
+	});
+});
+
+describe('fetchImageExtension', () => {
+	const originalFetch = globalThis.fetch;
+
+	it('returns empty string for empty url', async () => {
+		expect(await fetchImageExtension('')).toBe('');
+	});
+
+	it('extracts extension from blob URL by fetching blob type', async () => {
+		globalThis.fetch = (async () => ({
+			blob: async () => ({ type: 'image/webp' }),
+		})) as any;
+
+		try {
+			expect(await fetchImageExtension('blob:http://example.com/uuid')).toBe('webp');
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
+	it('maps specialized blob mime types such as svg+xml to svg', async () => {
+		globalThis.fetch = (async () => ({
+			blob: async () => ({ type: 'image/svg+xml' }),
+		})) as any;
+
+		try {
+			expect(await fetchImageExtension('blob:http://example.com/uuid2')).toBe('svg');
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
+	it('fetches HEAD and parses content-type for HTTP URLs', async () => {
+		globalThis.fetch = (async (_url: string, options: any) => {
+			expect(options?.method).toBe('HEAD');
+			return {
+				ok: true,
+				headers: new Headers({ 'content-type': 'image/jpeg; charset=utf-8' }),
+			};
+		}) as any;
+
+		try {
+			expect(await fetchImageExtension('https://example.com/image-without-ext')).toBe('jpg');
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
+	it('returns empty string when HEAD response is not ok', async () => {
+		globalThis.fetch = (async () => ({
+			ok: false,
+			headers: new Headers(),
+		})) as any;
+
+		try {
+			expect(await fetchImageExtension('https://example.com/404-image')).toBe('');
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
+	it('gracefully returns empty string when fetch throws (e.g. CORS or network error)', async () => {
+		globalThis.fetch = (async () => {
+			throw new Error('Failed to fetch (CORS block)');
+		}) as any;
+
+		try {
+			expect(await fetchImageExtension('https://example.com/cors-blocked')).toBe('');
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
 	});
 });

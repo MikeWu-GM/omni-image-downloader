@@ -36,12 +36,8 @@ export const mockChrome = (opts?: { storage?: Record<string, any> }) => {
 		},
 		runtime: {
 			getManifest: () => manifest,
-			onInstalled: {
-				addListener: mock(),
-			},
-			onMessage: {
-				addListener: mock(),
-			},
+			onInstalled: createChromeEvent(),
+			onMessage: createChromeEvent(),
 			sendMessage: mock(),
 		},
 		tabs: {

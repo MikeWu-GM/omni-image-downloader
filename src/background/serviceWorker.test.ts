@@ -192,3 +192,76 @@ describe('serviceWorker tab-scoped sidePanel', () => {
 		expect(chrome.sidePanel.open).toHaveBeenCalledWith({ tabId: 101 });
 	});
 });
+
+describe('serviceWorker cleanup completed tasks', () => {
+	it('removes tasks and filename listener when downloads complete', async () => {
+		const done = startBatch(['https://example.com/1.jpg']);
+		const downloadId = downloadIds[downloadIds.length - 1];
+
+		expect(chrome.downloads.onDeterminingFilename.listeners.size).toBe(1);
+
+		const onChangedListener = [...chrome.downloads.onChanged.listeners][0] as (delta: any) => void;
+		expect(onChangedListener).toBeDefined();
+
+		onChangedListener({ id: downloadId, state: { current: 'complete' } });
+		await done;
+
+		expect(chrome.downloads.onDeterminingFilename.listeners.size).toBe(0);
+	});
+
+	it('cleans up task when download gets interrupted', async () => {
+		const done = startBatch(['https://example.com/2.jpg']);
+		const downloadId = downloadIds[downloadIds.length - 1];
+
+		expect(chrome.downloads.onDeterminingFilename.listeners.size).toBe(1);
+
+		const onChangedListener = [...chrome.downloads.onChanged.listeners][0] as (delta: any) => void;
+		expect(onChangedListener).toBeDefined();
+
+		onChangedListener({ id: downloadId, state: { current: 'interrupted' } });
+		await done;
+
+		expect(chrome.downloads.onDeterminingFilename.listeners.size).toBe(0);
+	});
+});
+
+describe('serviceWorker open_mode dynamic updates and installation', () => {
+	it('opens the Options page when extension is newly installed', async () => {
+		const installedListener = [...chrome.runtime.onInstalled.listeners][0] as (details: {
+			reason: string;
+		}) => Promise<void>;
+		expect(installedListener).toBeDefined();
+
+		await installedListener({ reason: 'install' });
+		expect(chrome.tabs.create).toHaveBeenCalledWith({ url: 'src/Options/index.html' });
+	});
+
+	it('updates action popup when storage changes open_mode', async () => {
+		const storageListener = [...chrome.storage.onChanged.listeners][0] as (
+			changes: Record<string, any>,
+			areaName: string
+		) => Promise<void>;
+		expect(storageListener).toBeDefined();
+
+		await chrome.storage.local.set({ open_mode: 'popup' });
+		await storageListener({ open_mode: { newValue: 'popup' } }, 'local');
+		expect(chrome.action.setPopup).toHaveBeenCalledWith({ popup: 'src/Popup/index.html' });
+
+		await chrome.storage.local.set({ open_mode: 'sidebar' });
+		await storageListener({ open_mode: { newValue: 'sidebar' } }, 'local');
+		expect(chrome.action.setPopup).toHaveBeenCalledWith({ popup: '' });
+	});
+
+	it('ignores storage changes from non-local areas or unrelated keys', async () => {
+		const storageListener = [...chrome.storage.onChanged.listeners][0] as (
+			changes: Record<string, any>,
+			areaName: string
+		) => Promise<void>;
+		chrome.action.setPopup.mockClear();
+
+		await storageListener({ other_key: { newValue: 123 } }, 'local');
+		await storageListener({ open_mode: { newValue: 'popup' } }, 'sync');
+
+		expect(chrome.action.setPopup).not.toHaveBeenCalled();
+	});
+});
