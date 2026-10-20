@@ -19,7 +19,6 @@ export const defaults = {
 	// UI
 	open_mode: 'sidebar',
 	theme: 'light',
-	prototype_variant: 'A', // 'A' | 'B' | 'C'
 	// Filters
 	filter_url: '',
 	filter_url_mode: 'normal',

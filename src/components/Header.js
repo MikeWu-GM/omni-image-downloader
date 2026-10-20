@@ -46,19 +46,19 @@ export function Header(/** @type {Object} */ props) {
 	};
 
 	const getActiveSizeLabel = () => {
-		if (filterSizePreset.value === 'large') return `大图 ≥${customLargeThreshold.value}px`;
+		if (filterSizePreset.value === 'large') return `Large ≥${customLargeThreshold.value}px`;
 		if (filterSizePreset.value === 'medium')
-			return `中图 (${customSmallThreshold.value}-${customLargeThreshold.value})`;
-		if (filterSizePreset.value === 'small') return `小图 <${customSmallThreshold.value}px`;
+			return `Medium (${customSmallThreshold.value}-${customLargeThreshold.value})`;
+		if (filterSizePreset.value === 'small') return `Small <${customSmallThreshold.value}px`;
 		if (filterSizePreset.value === 'custom') {
 			if (filterMinWidthEnabled.value && filterMaxWidthEnabled.value) {
 				return `${filterMinWidth.value}~${filterMaxWidth.value}px`;
 			}
 			if (filterMinWidthEnabled.value) return `≥${filterMinWidth.value}px`;
 			if (filterMaxWidthEnabled.value) return `≤${filterMaxWidth.value}px`;
-			return '自定义尺寸';
+			return 'Custom size';
 		}
-		return '尺寸: 全部';
+		return 'Size: All';
 	};
 
 	const numberOfActiveAdvancedFilters = [
@@ -181,9 +181,7 @@ export function Header(/** @type {Object} */ props) {
 							<div
 								class="text-2xs absolute top-full left-0 z-50 mt-1 flex min-w-56 flex-col rounded-lg border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
 							>
-								<div class="text-3xs mb-1 font-bold tracking-wider text-slate-400 uppercase">
-									快捷档位 (自动联动滑块)
-								</div>
+								<div class="text-3xs mb-1 font-bold tracking-wider text-slate-400 uppercase">Size presets</div>
 
 								<button
 									type="button"
@@ -197,7 +195,7 @@ export function Header(/** @type {Object} */ props) {
 										showSizeMenu.value = false;
 									}}
 								>
-									<span>全部尺寸 (无限制)</span>
+									<span>All sizes (No limit)</span>
 									${
 										filterSizePreset.value === 'all' && !filterMinWidthEnabled.value && !filterMaxWidthEnabled.value
 											? html`<span>✓</span>`
@@ -215,7 +213,7 @@ export function Header(/** @type {Object} */ props) {
 										showSizeMenu.value = false;
 									}}
 								>
-									<span>大图 (≥${customLargeThreshold.value}px)</span>
+									<span>Large (≥${customLargeThreshold.value}px)</span>
 									${filterSizePreset.value === 'large' ? html`<span>✓</span>` : null}
 								</button>
 
@@ -229,7 +227,7 @@ export function Header(/** @type {Object} */ props) {
 										showSizeMenu.value = false;
 									}}
 								>
-									<span>中图 (${customSmallThreshold.value}-${customLargeThreshold.value}px)</span>
+									<span>Medium (${customSmallThreshold.value}-${customLargeThreshold.value}px)</span>
 									${filterSizePreset.value === 'medium' ? html`<span>✓</span>` : null}
 								</button>
 
@@ -243,18 +241,18 @@ export function Header(/** @type {Object} */ props) {
 										showSizeMenu.value = false;
 									}}
 								>
-									<span>小图 (&lt;${customSmallThreshold.value}px)</span>
+									<span>${`Small (<${customSmallThreshold.value}px)`}</span>
 									${filterSizePreset.value === 'small' ? html`<span>✓</span>` : null}
 								</button>
 
 								<div class="my-1.5 border-t border-slate-200 dark:border-slate-700"></div>
 
 								<!-- Custom Thresholds and Slider Linkage -->
-								<div class="text-3xs mb-1 font-bold tracking-wider text-slate-400 uppercase">自定义阈值与滑条联动</div>
+								<div class="text-3xs mb-1 font-bold tracking-wider text-slate-400 uppercase">Custom thresholds</div>
 
 								<div class="flex flex-col gap-1.5 rounded bg-slate-50 p-1.5 dark:bg-slate-900/60">
 									<label class="text-2xs flex items-center justify-between">
-										<span>大图阈值 ≥</span>
+										<span>Large ≥</span>
 										<div class="flex items-center gap-1">
 											<input
 												type="number"
@@ -278,7 +276,7 @@ export function Header(/** @type {Object} */ props) {
 									</label>
 
 									<label class="text-2xs flex items-center justify-between">
-										<span>小图阈值 &lt;</span>
+										<span>${'Small <'}</span>
 										<div class="flex items-center gap-1">
 											<input
 												type="number"
@@ -310,7 +308,7 @@ export function Header(/** @type {Object} */ props) {
 											showSizeMenu.value = false;
 										}}
 									>
-										<span>🎚️ 展开下方双向精密滑条微调</span>
+										<span>🎚️ Adjust with sliders</span>
 									</button>
 								</div>
 							</div>
@@ -328,18 +326,18 @@ export function Header(/** @type {Object} */ props) {
 							} flex items-center gap-1 rounded border px-2 py-1 font-medium transition-colors"
 							title=${
 								selectedFormats.value.length > 0
-									? `已选类型: ${selectedFormats.value.join(', ').toUpperCase()}`
-									: '按检测到的图片类型筛选'
+									? `Selected formats: ${selectedFormats.value.join(', ').toUpperCase()}`
+									: 'Filter by detected image format'
 							}
 							onClick=${toggle(showFormatMenu)}
 						>
 							<span>
 								${
 									selectedFormats.value.length === 0
-										? '类型: 全部'
+										? 'Format: All'
 										: selectedFormats.value.length === 1
-											? `类型: ${selectedFormats.value[0].toUpperCase()}`
-											: `类型: (${selectedFormats.value.length})`
+											? `Format: ${selectedFormats.value[0].toUpperCase()}`
+											: `Format: (${selectedFormats.value.length})`
 								}
 							</span>
 							<span class="text-3xs">▾</span>
@@ -354,7 +352,7 @@ export function Header(/** @type {Object} */ props) {
 									class="flex items-center justify-between rounded px-2 py-1 font-semibold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"
 									onClick=${() => (selectedFormats.value = [])}
 								>
-									<span>全部格式</span>
+									<span>All formats</span>
 									${selectedFormats.value.length === 0 ? html`<span>✓</span>` : null}
 								</button>
 

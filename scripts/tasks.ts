@@ -1,6 +1,6 @@
 import { $ } from 'bun';
 import fs from 'fs-extra';
-import { delimiter, dirname, join, normalize } from 'path';
+import { delimiter, dirname, join, normalize, resolve } from 'path';
 import sharp from 'sharp';
 
 import * as config from './config';
@@ -33,6 +33,25 @@ export async function buildFirefox() {
 	const manifestPath = join(config.firefox.build, 'manifest.json');
 	const manifest = await fs.readJson(manifestPath);
 	await fs.writeJson(manifestPath, { ...manifest, ...config.firefox.manifest }, { spaces: '\t' });
+}
+
+export async function buildZip() {
+	const targets: [string, string][] = [
+		[resolve(config.build), resolve('../image-downloader.zip')],
+		[resolve(config.firefox.build), resolve('../image-downloader-firefox.zip')],
+	];
+
+	for (const [srcDir, zipDest] of targets) {
+		await fs.remove(zipDest);
+		const entries = await fs.readdir(srcDir);
+		if (entries.length === 0) continue;
+
+		if (process.platform === 'win32') {
+			await $`tar -a -cf ${zipDest} ${entries}`.cwd(srcDir);
+		} else {
+			await $`zip -qr ${zipDest} .`.cwd(srcDir);
+		}
+	}
 }
 
 export async function buildCss() {
@@ -104,6 +123,7 @@ export const tasks = {
 	updateManifest,
 	buildCss,
 	buildFirefox,
+	buildZip,
 	copyFile,
 	removeFile,
 } satisfies Record<string, Task>;

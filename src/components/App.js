@@ -3,6 +3,7 @@ import html, { For, useEffect } from '../html.js';
 
 import {
 	allImages,
+	detectedImageExtensions,
 	imageErrored,
 	imageLoaded,
 	imagesCache,
@@ -10,11 +11,13 @@ import {
 	initialized,
 	loadImagesFromActiveTab,
 	reloadImagesWhenPageLoads,
+	updateDetectedExtension,
 } from './data.js';
 import { ErrorBoundary } from './ErrorBoundary.js';
 import { Footer } from './Footer.js';
 import { Header } from './Header.js';
 import { Images } from './Images.js';
+import { fetchImageExtension, getImageExtension } from './useImageStats.js';
 import { useTheme } from './useTheme.js';
 
 export function App() {
@@ -44,7 +47,19 @@ function AppWithoutErrorBoundary() {
 		<div id="images_cache" ref=${(/** @type {HTMLDivElement} */ element) => (imagesCache.value = element)} hidden>
 			<${For} each=${allImages}>
 				${(/** @type {string} */ url) => html`
-					<img key=${url} src=${url} onLoad=${() => imageLoaded(url)} onError=${() => imageErrored(url)} />
+					<img
+						key=${url}
+						src=${url}
+						onLoad=${() => {
+							imageLoaded(url);
+							if (!getImageExtension(url) && !detectedImageExtensions.peek()[url]) {
+								fetchImageExtension(url).then((ext) => {
+									if (ext) updateDetectedExtension(url, ext);
+								});
+							}
+						}}
+						onError=${() => imageErrored(url)}
+					/>
 				`}
 			<//>
 		</div>

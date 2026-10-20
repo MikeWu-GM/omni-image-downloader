@@ -90,6 +90,8 @@ function ImageCard(/** @type {{ imageUrl: string }} */ { imageUrl, ...props }) {
 					: html`<img
 							key=${retryCount}
 							class="drop-shadow-md"
+							loading="lazy"
+							decoding="async"
 							src=${imageUrl}
 							onLoad=${(/** @type {Event}  */ e) => {
 								imageLoaded(imageUrl);

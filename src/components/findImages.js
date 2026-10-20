@@ -60,7 +60,6 @@ export async function findImages(
 		/** @type {(Document | ShadowRoot)[]} */
 		const roots = [root];
 
-		/** @type {Document | ShadowRoot | undefined} */ let current;
 		for (let index = 0; index < roots.length; index++) {
 			const current = roots[index];
 			// Find all potential shadow hosts in this root

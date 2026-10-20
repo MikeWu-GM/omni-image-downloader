@@ -51,10 +51,29 @@ beforeEach(() => {
 	document.body.innerHTML = '<main></main>';
 });
 
-it(`renders images`, async () => {
+it(`renders images and detects extension for extensionless cached images`, async () => {
+	(globalThis as any).fetch = mock(() =>
+		Promise.resolve({
+			ok: true,
+			headers: { get: (name: string) => (name.toLowerCase() === 'content-type' ? 'image/webp' : null) },
+		})
+	);
+
 	require('./Popup');
 
 	await new Promise((resolve) => setTimeout(resolve, 50));
 
-	expect(document.querySelectorAll('#images_cache img').length).toBe(3);
+	const cachedImages = document.querySelectorAll('#images_cache img');
+	expect(cachedImages.length).toBe(3);
+
+	const { allImages, detectedImageExtensions } = require('../components/data.js');
+	allImages.value = ['http://example.com/dynamic-photo'];
+	await new Promise((resolve) => setTimeout(resolve, 20));
+
+	const dynamicImg = document.querySelector('#images_cache img') as HTMLImageElement;
+	expect(dynamicImg).not.toBeNull();
+	dynamicImg.dispatchEvent(new (window as any).Event('load'));
+
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	expect(detectedImageExtensions.value['http://example.com/dynamic-photo']).toBe('webp');
 });

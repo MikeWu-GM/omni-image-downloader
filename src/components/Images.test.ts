@@ -24,11 +24,35 @@ describe('Images component', () => {
 		allImages.value = ['https://example.com/1.png', 'https://example.com/2.png'];
 	});
 
-	it('renders image cards for displayed images', () => {
+	it('renders image cards for displayed images with lazy loading and async decoding', () => {
 		render(html`<${Images} />`, container);
 
 		const imgElements = container.querySelectorAll('img.drop-shadow-md');
 		expect(imgElements.length).toBe(2);
+		expect(imgElements[0].getAttribute('loading')).toBe('lazy');
+		expect(imgElements[0].getAttribute('decoding')).toBe('async');
+	});
+
+	it('copies image URL to clipboard when copy button is clicked', async () => {
+		const writeTextMock = mock(() => Promise.resolve());
+		Object.defineProperty(window.navigator, 'clipboard', {
+			value: { writeText: writeTextMock },
+			configurable: true,
+		});
+
+		render(html`<${Images} />`, container);
+
+		const urlInputs = container.querySelectorAll('input[readonly]') as NodeListOf<HTMLInputElement>;
+		expect(urlInputs.length).toBe(2);
+		urlInputs[0].click();
+
+		const copyButtons = container.querySelectorAll('button[title="Copy image URL to clipboard"]');
+		expect(copyButtons.length).toBe(2);
+		(copyButtons[0] as HTMLButtonElement).click();
+
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		expect(writeTextMock).toHaveBeenCalledWith('https://example.com/1.png');
+		expect(urlInputs[0].value).toBe('Copied URL!');
 	});
 
 	it('toggles image selection when a card is clicked', () => {
