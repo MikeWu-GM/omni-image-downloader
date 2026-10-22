@@ -13,7 +13,7 @@ export const firefox = {
 		background: { scripts: ['src/background/serviceWorker.js'] },
 		browser_specific_settings: {
 			gecko: {
-				id: 'image-downloader@vdsabev',
+				id: 'omni-image-downloader@extension',
 				strict_min_version: '140.0',
 				data_collection_permissions: { required: ['none'] },
 			},

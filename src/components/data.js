@@ -52,12 +52,16 @@ export const defaults = {
 };
 
 /** @template {keyof Options} K */
-function storedSignal(/** @type {K} */ key) {
+function storedSignal(
+	/** @type {K} */ key,
+	/** @type {((val: Options[K]) => Options[K]) | undefined} */ serialize = undefined
+) {
 	const ss = signal(defaults[key]);
 
 	effect(() => {
 		if (initialized.value) {
-			chrome.storage.local.set({ [key]: ss.value });
+			const valueToStore = serialize ? serialize(ss.value) : ss.value;
+			chrome.storage.local.set({ [key]: valueToStore })?.catch?.(() => {});
 		}
 	});
 
@@ -146,7 +150,9 @@ export const downloadConfirmationIsShown = signal(false);
 
 // Images
 /** @type {import('@preact/signals').Signal<string[]>} */
-export const selectedImages = storedSignal('selected_images');
+export const selectedImages = storedSignal('selected_images', (urls) =>
+	urls.filter((url) => !url.startsWith('data:') && !url.startsWith('blob:'))
+);
 
 export const columns = storedSignal('columns');
 
@@ -245,16 +251,24 @@ export const imagesLoadedVersion = signal(0);
 
 export const imagesCache = { value: /** @type {HTMLDivElement | null} */ (null) }; // Not displayed; used for loading images and their stats like size or resolution
 
-export const imageLoaded = action((/** @type {string | undefined} */ url) => {
-	if (!url) return;
+export const imageLoaded = action(
+	(/** @type {string | undefined} */ url, /** @type {number} */ width = 0, /** @type {number} */ height = 0) => {
+		if (!url) return;
 
-	batch(() => {
-		if (erroredImages.peek().includes(url)) {
-			erroredImages.value = erroredImages.value.filter(isNotStrictEqual(url));
-		}
-		imagesLoadedVersion.value++;
-	});
-});
+		batch(() => {
+			if (width > 0 && height > 0) {
+				const existing = imageDimensions.peek()[url];
+				if (!existing || width * height > existing.width * existing.height) {
+					imageDimensions.value = { ...imageDimensions.peek(), [url]: { width, height } };
+				}
+			}
+			if (erroredImages.peek().includes(url)) {
+				erroredImages.value = erroredImages.value.filter(isNotStrictEqual(url));
+			}
+			imagesLoadedVersion.value++;
+		});
+	}
+);
 
 export const erroredImages = signal(/** @type {string[]} */ ([]));
 export const imageErrored = action((/** @type {string | undefined} */ url) => {
@@ -309,6 +323,14 @@ export const availableFormats = computed(() => {
 // Tabs
 export const tab = signal('matching');
 
+function getFilterableUrl(/** @type {string} */ url) {
+	if (url.startsWith('data:') && url.length > 256) {
+		const commaIndex = url.indexOf(',');
+		return url.slice(0, commaIndex !== -1 ? Math.min(commaIndex + 1, 128) : 128);
+	}
+	return url.length > 2048 ? url.slice(0, 2048) : url;
+}
+
 export const matchingImages = computed(() => {
 	let filtered = onlyImagesFromLinks.value ? linkedImages.value : allImages.value;
 
@@ -318,6 +340,7 @@ export const matchingImages = computed(() => {
 			case 'normal':
 				const terms = filterValue.split(/\s+/);
 				filtered = filtered.filter((url) => {
+					const targetUrl = getFilterableUrl(url);
 					for (let index = 0; index < terms.length; index++) {
 						let term = terms[index];
 						if (term.length !== 0) {
@@ -328,7 +351,7 @@ export const matchingImages = computed(() => {
 									continue;
 								}
 							}
-							const found = url.indexOf(term) !== -1;
+							const found = targetUrl.indexOf(term) !== -1;
 							if (found !== expected) {
 								return false;
 							}
@@ -340,17 +363,16 @@ export const matchingImages = computed(() => {
 			case 'wildcard':
 				filterValue = filterValue
 					.replace(/([.^$[\]\\(){}|+-])/g, '\\$1')
-					.replace(/\*/g, '.*')
+					.replace(/\*+/g, '.*')
 					.replace(/\?/g, '.');
 			/* fall through */
 			case 'regex':
-				filtered = filtered.filter((url) => {
-					try {
-						return url.match(filterValue);
-					} catch (error) {
-						return false;
-					}
-				});
+				try {
+					const regex = new RegExp(filterValue);
+					filtered = filtered.filter((url) => regex.test(getFilterableUrl(url)));
+				} catch (error) {
+					filtered = [];
+				}
 				break;
 		}
 	}
@@ -358,6 +380,24 @@ export const matchingImages = computed(() => {
 	// Subscribe to imagesLoadedVersion so matchingImages re-evaluates when images finish loading
 	imagesLoadedVersion.value;
 	const currentDimensions = imageDimensions.value;
+	/** @type {Record<string, { width: number; height: number }>} */
+	const effectiveDimensions = { ...currentDimensions };
+	/** @type {Map<string, HTMLImageElement> | null} */
+	let domImagesBySrc = null;
+	const getDomImage = (/** @type {string} */ src) => {
+		if (!imagesCache.value) return undefined;
+		if (!domImagesBySrc) {
+			domImagesBySrc = new Map();
+			for (const img of imagesCache.value.querySelectorAll('img')) {
+				const attr = img.getAttribute('src');
+				if (attr && !domImagesBySrc.has(attr)) {
+					domImagesBySrc.set(attr, img);
+				}
+			}
+		}
+		return domImagesBySrc.get(src);
+	};
+
 	const preset = filterSizePreset.value;
 	const activeFormats = selectedFormats.value;
 	const largeThreshold = customLargeThreshold.value;
@@ -366,14 +406,17 @@ export const matchingImages = computed(() => {
 	filtered = filtered.filter((url) => {
 		if (!imagesCache.value) return false;
 
-		const cachedDim = currentDimensions[url];
+		const cachedDim = effectiveDimensions[url];
 		let width = cachedDim?.width;
 		let height = cachedDim?.height;
 
 		if (width == null || height == null) {
-			const image = findImageBySrc(imagesCache.value, url);
+			const image = getDomImage(url);
 			width = image?.naturalWidth || 0;
 			height = image?.naturalHeight || 0;
+			if (width > 0 && height > 0) {
+				effectiveDimensions[url] = { width, height };
+			}
 		}
 
 		// Size preset logic
@@ -411,7 +454,7 @@ export const matchingImages = computed(() => {
 	});
 
 	if (onlyUniqueImages.value && imagesCache.value) {
-		filtered = deduplicateImages(filtered, imagesCache.value, currentDimensions);
+		filtered = deduplicateImages(filtered, imagesCache.value, effectiveDimensions);
 	}
 
 	return filtered;
@@ -521,12 +564,22 @@ function executeOnTab(
 			}
 		})
 		.catch((error) => {
-			// Ignore some errors that happen regularly when navigating around
-			if (error.message === 'Cannot access a chrome:// URL') return;
+			const msg = error?.message || '';
+			// Ignore expected browser/permission errors that happen regularly when navigating around
+			if (
+				msg === 'Cannot access a chrome:// URL' ||
+				msg.startsWith('Cannot access a chrome') ||
+				msg.startsWith('Cannot access contents of') ||
+				msg.includes('extensions gallery cannot be scripted') ||
+				msg.includes('Frame with ID') ||
+				msg.includes('No tab with id')
+			) {
+				return;
+			}
 			// Extensions can't access browser pages, and Firefox's error for them is the same as for losing access to a web page
 			if (activeTab.url && browserPageUrl.test(activeTab.url)) return;
 
-			scriptError.value = error.message;
+			scriptError.value = msg;
 		});
 }
 
@@ -553,7 +606,8 @@ export const loadImagesFromActiveTab = action(
 		if (targetId != null) {
 			if (chrome.tabs.get) {
 				chrome.tabs.get(targetId, (tab) => {
-					if (tab) executeOnTab(tab, waitForIdleDOM);
+					if (chrome.runtime?.lastError || !tab) return;
+					executeOnTab(tab, waitForIdleDOM);
 				});
 			} else {
 				executeOnTab({ id: targetId }, waitForIdleDOM);
@@ -562,8 +616,9 @@ export const loadImagesFromActiveTab = action(
 		}
 
 		chrome.windows.getCurrent((currentWindow) => {
+			if (chrome.runtime?.lastError || !currentWindow) return;
 			chrome.tabs.query({ active: true, windowId: currentWindow.id }, (activeTabs) => {
-				if (activeTabs.length === 0) return;
+				if (chrome.runtime?.lastError || !activeTabs || activeTabs.length === 0) return;
 				const activeTab = activeTabs[0];
 				if (activeTab.id != null) {
 					setLockedTabId(activeTab.id);

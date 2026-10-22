@@ -1,5 +1,5 @@
 // @ts-check
-import html, { useEffect, useRef } from '../html.js';
+import html, { batch, useEffect, useRef, useSignal } from '../html.js';
 import { setToCheckboxValue } from '../utils.js';
 
 import noUiSlider from 'nouislider';
@@ -21,8 +21,8 @@ import {
 } from './data.js';
 
 export function AdvancedFilters() {
-	const widthSliderRef = useSlider('width');
-	const heightSliderRef = useSlider('height');
+	const widthSlider = useSlider('width');
+	const heightSlider = useSlider('height');
 
 	return html`
 		<div class="p-2 pt-0">
@@ -44,7 +44,7 @@ export function AdvancedFilters() {
 							} flex items-center justify-end"
 							title=${getSliderCheckboxTooltip(filterMinWidthEnabled.value)}
 						>
-							<small>${filterMinWidth}px ≤</small>
+							<small>${widthSlider.displayMin}px ≤</small>
 							<input
 								type="checkbox"
 								checked=${filterMinWidthEnabled}
@@ -54,7 +54,7 @@ export function AdvancedFilters() {
 					</td>
 
 					<td class="px-4 py-1.5">
-						<div ref=${widthSliderRef}></div>
+						<div ref=${widthSlider.sliderRef}></div>
 					</td>
 
 					<td>
@@ -69,7 +69,7 @@ export function AdvancedFilters() {
 								checked=${filterMaxWidthEnabled}
 								onChange=${setToCheckboxValue(filterMaxWidthEnabled)}
 							/>
-							<small>≤ ${filterMaxWidth}px</small>
+							<small>≤ ${widthSlider.displayMax}px</small>
 						</label>
 					</td>
 				</tr>
@@ -84,7 +84,7 @@ export function AdvancedFilters() {
 							} flex items-center justify-end text-nowrap"
 							title=${getSliderCheckboxTooltip(filterMinHeightEnabled.value)}
 						>
-							<small>${filterMinHeight}px ≤</small>
+							<small>${heightSlider.displayMin}px ≤</small>
 							<input
 								type="checkbox"
 								checked=${filterMinHeightEnabled}
@@ -94,7 +94,7 @@ export function AdvancedFilters() {
 					</td>
 
 					<td class="px-4 py-1.5">
-						<div ref=${heightSliderRef}></div>
+						<div ref=${heightSlider.sliderRef}></div>
 					</td>
 
 					<td>
@@ -109,7 +109,7 @@ export function AdvancedFilters() {
 								checked=${filterMaxHeightEnabled}
 								onChange=${setToCheckboxValue(filterMaxHeightEnabled)}
 							/>
-							<small>≤ ${filterMaxHeight}px</small>
+							<small>≤ ${heightSlider.displayMax}px</small>
 						</label>
 					</td>
 				</tr>
@@ -153,10 +153,42 @@ function useSlider(/** @type {'width' | 'height'} */ dimension) {
 	const maxDefault = dimension === 'width' ? defaults.filter_max_width : defaults.filter_max_height;
 	const minSignal = dimension === 'width' ? filterMinWidth : filterMinHeight;
 	const maxSignal = dimension === 'width' ? filterMaxWidth : filterMaxHeight;
+	const displayMin = useSignal(minSignal.peek());
+	const displayMax = useSignal(maxSignal.peek());
 
 	useEffect(() => {
 		const slider = /** @type {import('nouislider').target | null} */ (sliderRef.current);
 		if (!slider) return;
+
+		/** @type {ReturnType<typeof setTimeout> | number | null} */
+		let frameTimer = null;
+		/** @type {(string | number)[] | null} */
+		let pendingValues = null;
+		const scheduleFrame =
+			typeof window !== 'undefined' && window.requestAnimationFrame
+				? window.requestAnimationFrame.bind(window)
+				: (/** @type {() => void} */ cb) => setTimeout(cb, 16);
+		const cancelFrame =
+			typeof window !== 'undefined' && window.cancelAnimationFrame
+				? window.cancelAnimationFrame.bind(window)
+				: clearTimeout;
+
+		const commitFilterSignals = (/** @type {(string | number)[]} */ [min, max]) => {
+			if (frameTimer != null) {
+				cancelFrame(/** @type {any} */ (frameTimer));
+				frameTimer = null;
+			}
+			pendingValues = null;
+			const nextMin = Number(min);
+			const nextMax = Number(max);
+			batch(() => {
+				displayMin.value = nextMin;
+				displayMax.value = nextMax;
+				if (minSignal.peek() !== nextMin) minSignal.value = nextMin;
+				if (maxSignal.peek() !== nextMax) maxSignal.value = nextMax;
+				if (filterSizePreset.peek() !== 'custom') filterSizePreset.value = 'custom';
+			});
+		};
 
 		noUiSlider.create(slider, {
 			behaviour: 'extend-tap',
@@ -170,19 +202,33 @@ function useSlider(/** @type {'width' | 'height'} */ dimension) {
 				max: maxDefault,
 			},
 			step: 10,
-			start: [minSignal.value, maxSignal.value],
+			start: [minSignal.peek(), maxSignal.peek()],
 		});
 
 		slider.noUiSlider?.on('update', (/** @type {(string | number)[]} */ [min, max]) => {
-			minSignal.value = /** @type {number} */ (min);
-			maxSignal.value = /** @type {number} */ (max);
+			const nextMin = Number(min);
+			const nextMax = Number(max);
+			batch(() => {
+				displayMin.value = nextMin;
+				displayMax.value = nextMax;
+			});
 		});
 
-		slider.noUiSlider?.on('slide', () => {
-			filterSizePreset.value = 'custom';
+		slider.noUiSlider?.on('slide', (/** @type {(string | number)[]} */ values) => {
+			pendingValues = values;
+			if (frameTimer != null) return;
+			frameTimer = scheduleFrame(() => {
+				frameTimer = null;
+				if (pendingValues) {
+					commitFilterSignals(pendingValues);
+				}
+			});
 		});
+
+		slider.noUiSlider?.on('change', commitFilterSignals);
 
 		return () => {
+			if (frameTimer != null) cancelFrame(/** @type {any} */ (frameTimer));
 			if (slider.noUiSlider) {
 				slider.noUiSlider.destroy();
 			}
@@ -190,13 +236,23 @@ function useSlider(/** @type {'width' | 'height'} */ dimension) {
 	}, [dimension]);
 
 	useEffect(() => {
+		const nextMin = minSignal.value;
+		const nextMax = maxSignal.value;
+		batch(() => {
+			displayMin.value = nextMin;
+			displayMax.value = nextMax;
+		});
+
 		const slider = /** @type {import('nouislider').target | null} */ (sliderRef.current);
 		if (!slider?.noUiSlider) return;
+		if (slider.classList.contains('noUi-state-drag')) return;
+
 		const current = slider.noUiSlider.get(true);
 		if (Array.isArray(current)) {
-			const [curMin, curMax] = current;
-			if (curMin !== minSignal.value || curMax !== maxSignal.value) {
-				slider.noUiSlider.set([minSignal.value, maxSignal.value]);
+			const curMin = Math.round(Number(current[0]));
+			const curMax = Math.round(Number(current[1]));
+			if (curMin !== Math.round(nextMin) || curMax !== Math.round(nextMax)) {
+				slider.noUiSlider.set([nextMin, nextMax]);
 			}
 		}
 	}, [minSignal.value, maxSignal.value]);
@@ -231,7 +287,7 @@ function useSlider(/** @type {'width' | 'height'} */ dimension) {
 		dimension === 'width' ? filterMaxWidthEnabled.value : filterMaxHeightEnabled.value
 	);
 
-	return sliderRef;
+	return { sliderRef, displayMin, displayMax };
 }
 
 function useDisableSliderHandle(

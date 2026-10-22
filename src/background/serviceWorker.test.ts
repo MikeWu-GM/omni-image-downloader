@@ -191,6 +191,18 @@ describe('serviceWorker tab-scoped sidePanel', () => {
 		});
 		expect(chrome.sidePanel.open).toHaveBeenCalledWith({ tabId: 101 });
 	});
+
+	it('falls back to opening sidePanel by windowId when open({ tabId }) rejects asynchronously', async () => {
+		const actionListener = chrome.action.onClicked.addListener.mock.calls[0]?.[0];
+		chrome.sidePanel.open = mock((opts: any) =>
+			opts.tabId != null ? Promise.reject(new Error('Tab closed')) : Promise.resolve()
+		);
+
+		await actionListener({ id: 101, windowId: 7 });
+		await new Promise((r) => setTimeout(r, 10));
+
+		expect(chrome.sidePanel.open).toHaveBeenCalledWith({ windowId: 7 });
+	});
 });
 
 describe('serviceWorker cleanup completed tasks', () => {
@@ -226,14 +238,14 @@ describe('serviceWorker cleanup completed tasks', () => {
 });
 
 describe('serviceWorker open_mode dynamic updates and installation', () => {
-	it('opens the Options page when extension is newly installed', async () => {
+	it('initializes action popup without opening any unsolicited Options tab on install', async () => {
 		const installedListener = [...chrome.runtime.onInstalled.listeners][0] as (details: {
 			reason: string;
 		}) => Promise<void>;
 		expect(installedListener).toBeDefined();
 
 		await installedListener({ reason: 'install' });
-		expect(chrome.tabs.create).toHaveBeenCalledWith({ url: 'src/Options/index.html' });
+		expect(chrome.tabs.create).not.toHaveBeenCalled();
 	});
 
 	it('updates action popup when storage changes open_mode', async () => {

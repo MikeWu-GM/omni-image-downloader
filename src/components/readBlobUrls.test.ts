@@ -10,3 +10,14 @@ it('turns readable blob URLs into data URLs and keeps unreadable ones', async ()
 		unreadable,
 	]);
 });
+
+it('skips non-image blobs and oversized blobs exceeding the safety threshold', async () => {
+	const videoBlobUrl = URL.createObjectURL(new Blob(['video bytes'], { type: 'video/mp4' }));
+	const imageBlobUrl = URL.createObjectURL(new Blob(['png bytes'], { type: 'image/png' }));
+
+	expect(await readBlobUrls([videoBlobUrl, imageBlobUrl], 4)).toEqual([videoBlobUrl, imageBlobUrl]);
+	expect(await readBlobUrls([videoBlobUrl, imageBlobUrl], 1024)).toEqual([
+		videoBlobUrl,
+		`data:image/png;base64,${btoa('png bytes')}`,
+	]);
+});

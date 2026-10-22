@@ -1,7 +1,7 @@
 // @ts-check
 import html, { For, Show, useComputed, useSignal } from '../html.js';
 
-import { getReferralUrl, isNotStrictEqual, stopPropagation } from '../utils.js';
+import { isNotStrictEqual, stopPropagation } from '../utils.js';
 import * as actions from './actions.js';
 import {
 	columns,
@@ -12,7 +12,6 @@ import {
 	selectedImages,
 	updateDetectedExtension,
 } from './data.js';
-import { ExternalLink } from './ExternalLink.js';
 import { useImageStats } from './useImageStats.js';
 import { useScrollToEnd } from './useScrollToEnd.js';
 
@@ -94,7 +93,8 @@ function ImageCard(/** @type {{ imageUrl: string }} */ { imageUrl, ...props }) {
 							decoding="async"
 							src=${imageUrl}
 							onLoad=${(/** @type {Event}  */ e) => {
-								imageLoaded(imageUrl);
+								const img = /** @type {HTMLImageElement} */ (e.currentTarget);
+								imageLoaded(imageUrl, img.naturalWidth, img.naturalHeight);
 								stats.onLoad(e);
 							}}
 							onError=${(/** @type {Event}  */ e) => {
@@ -122,7 +122,6 @@ function ImageCard(/** @type {{ imageUrl: string }} */ { imageUrl, ...props }) {
 			></div>
 
 			<div class="absolute top-1 right-1 hidden group-hover:flex gap-1">
-				<${RemoveBackgroundButton} imageUrl=${imageUrl} />
 				<${OpenImageButton} imageUrl=${imageUrl} onClick=${stopPropagation} />
 				<${DownloadImageButton} imageUrl=${imageUrl} onClick=${stopPropagation} />
 			</div>
@@ -178,30 +177,6 @@ const isBrowserOnlyUrl = (/** @type {string} */ url) => url.startsWith('data:') 
 
 // A `blob:` URL is left only where `readBlobUrls()` couldn't read it, and nothing outside the page can either
 const isUnreadableBlobUrl = (/** @type {string} */ url) => url.startsWith('blob:');
-
-function RemoveBackgroundButton(/** @type {{ imageUrl: string }} */ { imageUrl, ...props }) {
-	const disabled = isBrowserOnlyUrl(imageUrl);
-	return html`
-		<${ExternalLink}
-			...${props}
-			class="btn h-7 w-7 rounded bg-size-[20px] bg-center bg-no-repeat text-transparent shadow-md"
-			style=${{ backgroundImage: 'url("/images/cutout.svg")' }}
-			href=${
-				disabled
-					? undefined
-					: getReferralUrl('https://cutoutmagic.com/library', {
-							url: imageUrl,
-							utm_content: 'remove_background_button',
-						})
-			}
-			aria-disabled=${disabled}
-			title="Remove background with CutoutMagic.com"
-			onClick=${stopPropagation}
-		>
-			Remove background with CutoutMagic.com
-		<//>
-	`;
-}
 
 function OpenImageButton(
 	/** @type {{ imageUrl: string, onClick?: (e: MouseEvent) => void }} */ { imageUrl, onClick, ...props }

@@ -230,15 +230,15 @@ const mimeExtensions = {
 export async function fetchImageExtension(/** @type {string} */ url) {
 	if (!url) return '';
 
-	// Blob URLs: fetch the blob and read its type property
-	if (url.startsWith('blob:')) {
-		const response = await fetch(url);
-		const blob = await response.blob();
-		return mimeExtensions[blob.type] || blob.type.replace('image/', '') || '';
-	}
-
-	// Try HEAD request from browser cache
 	try {
+		// Blob URLs: fetch the blob and read its type property
+		if (url.startsWith('blob:')) {
+			const response = await fetch(url);
+			const blob = await response.blob();
+			return mimeExtensions[blob.type] || blob.type.replace('image/', '') || '';
+		}
+
+		// Try HEAD request from browser cache
 		const response = await fetch(url, {
 			method: 'HEAD',
 			cache: 'force-cache',
@@ -252,7 +252,7 @@ export async function fetchImageExtension(/** @type {string} */ url) {
 			}
 		}
 	} catch {
-		// CORS blocked or network error
+		// CORS blocked, unreadable blob, or network error
 	}
 
 	return '';

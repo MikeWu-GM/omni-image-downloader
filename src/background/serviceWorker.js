@@ -1,11 +1,6 @@
 // @ts-check
 // Handle updates
-chrome.runtime.onInstalled.addListener(async (details) => {
-	if (details.reason === 'install') {
-		// Open the Options page after install
-		chrome.tabs.create({ url: 'src/Options/index.html' });
-	}
-
+chrome.runtime.onInstalled.addListener(async () => {
 	// Set initial popup state based on open_mode
 	await updateActionPopup();
 });
@@ -23,7 +18,7 @@ updateActionPopup();
 // Disable the side panel globally so newly opened tabs do not show it by default.
 // Only tabs explicitly opened by the user will have enabled: true.
 if (chrome.sidePanel?.setOptions) {
-	chrome.sidePanel.setOptions({ enabled: false });
+	chrome.sidePanel.setOptions({ enabled: false })?.catch?.(() => {});
 }
 
 async function updateActionPopup() {
@@ -45,18 +40,28 @@ if (chrome.sidePanel) {
 		if (tab.id == null) return;
 
 		if (chrome.sidePanel.setOptions) {
-			chrome.sidePanel.setOptions({
-				tabId: tab.id,
-				path: `src/SidePanel/index.html?tabId=${tab.id}`,
-				enabled: true,
-			});
+			chrome.sidePanel
+				.setOptions({
+					tabId: tab.id,
+					path: `src/SidePanel/index.html?tabId=${tab.id}`,
+					enabled: true,
+				})
+				?.catch?.(() => {});
 		}
 
 		// Must call sidePanel.open synchronously to preserve the user gesture token!
+		const fallbackOpen = () => {
+			try {
+				chrome.sidePanel.open({ windowId: tab.windowId })?.catch?.(() => {});
+			} catch {}
+		};
 		try {
-			chrome.sidePanel.open({ tabId: tab.id });
+			const openPromise = chrome.sidePanel.open({ tabId: tab.id });
+			if (openPromise && typeof openPromise.catch === 'function') {
+				openPromise.catch(fallbackOpen);
+			}
 		} catch {
-			chrome.sidePanel.open({ windowId: tab.windowId });
+			fallbackOpen();
 		}
 	});
 }
@@ -136,7 +141,7 @@ async function downloadImages(/** @type {Task} */ task) {
 						tasksByDownloadId.set(downloadId, task);
 					} else {
 						if (chrome.runtime.lastError) {
-							console.error(`${image}:`, chrome.runtime.lastError.message);
+							console.warn(`${image}:`, chrome.runtime.lastError.message);
 						}
 					}
 					resolve();
@@ -159,7 +164,7 @@ async function downloadImages(/** @type {Task} */ task) {
 							tasksByDownloadId.set(downloadId, task);
 						} else {
 							if (chrome.runtime.lastError) {
-								console.error(`${filename}:`, chrome.runtime.lastError.message);
+								console.warn(`${filename}:`, chrome.runtime.lastError.message);
 							}
 						}
 						resolve();

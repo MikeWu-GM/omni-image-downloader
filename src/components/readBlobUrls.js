@@ -4,11 +4,14 @@
 // a Firefox content script fetches as the extension.
 
 /** @returns {Promise<string[]>} A `data:` URL for each blob URL, or the blob URL itself if it can't be read */
-export function readBlobUrls(/** @type {string[]} */ urls) {
+export function readBlobUrls(/** @type {string[]} */ urls, /** @type {number} */ maxBytes = 50 * 1024 * 1024) {
 	return Promise.all(
 		urls.map(async (url) => {
 			try {
 				const blob = await (await fetch(url)).blob();
+				if (!blob.type.startsWith('image/') || blob.size > maxBytes) {
+					return url;
+				}
 				const bytes = new Uint8Array(await blob.arrayBuffer());
 				let binary = '';
 				// Chunked, because spreading a whole image into `fromCharCode` overflows the call stack

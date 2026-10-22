@@ -120,4 +120,11 @@ describe('Images component', () => {
 			active: false,
 		});
 	});
+
+	it('does not render any external commercial referral links on image cards', () => {
+		render(html`<${Images} />`, container);
+
+		const externalLinks = container.querySelectorAll('a[href*="cutoutmagic"]');
+		expect(externalLinks.length).toBe(0);
+	});
 });

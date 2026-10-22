@@ -21,16 +21,6 @@
 	"background": {
 		"service_worker": "src/background/serviceWorker.js"
 	},
-	"web_accessible_resources": [
-		{
-			"resources": [
-				"images/*"
-			],
-			"matches": [
-				"<all_urls>"
-			]
-		}
-	],
 	"permissions": [
 		"activeTab",
 		"scripting",

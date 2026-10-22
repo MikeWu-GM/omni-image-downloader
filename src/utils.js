@@ -41,14 +41,14 @@ export const setToInvertedCheckboxValue = (/** @type {{ value: boolean }} */ sig
 	signal.value = !(/** @type {HTMLInputElement} */ (e.currentTarget).checked);
 };
 
-export const getReferralUrl = (/** @type {string} */ origin, /** @type {Object} */ params) => {
-	const url = new URL(origin);
-	url.searchParams.set('utm_source', 'image_downloader');
-	url.searchParams.set('utm_medium', 'chrome_extension');
-	url.searchParams.set('utm_campaign', 'internal_referral');
-	for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-	return url.toString();
-};
+/** @type {(value: string) => string} */
+export const escapeHtml = (value = '') =>
+	String(value)
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
 
 /** @type {(rawTitle?: string, fallbackHost?: string) => string} */
 export const sanitizeFolderName = (rawTitle = '', fallbackHost = '') => {
@@ -72,13 +72,22 @@ export const sanitizeFolderName = (rawTitle = '', fallbackHost = '') => {
 
 /** @type {(url: string, title?: string) => string} */
 export const generateSourceHtml = (url, title = '') => {
-	const safeTitle = title || url;
-	const safeUrl = url.replace(/"/g, '&quot;');
+	let isHttpUrl = false;
+	try {
+		const parsed = new URL(url);
+		isHttpUrl = parsed.protocol === 'http:' || parsed.protocol === 'https:';
+	} catch {
+		isHttpUrl = false;
+	}
+
+	const safeTitle = escapeHtml(title || (isHttpUrl ? url : 'Source Page'));
+	const safeUrl = isHttpUrl ? escapeHtml(url) : '#';
+	const metaRefresh = isHttpUrl ? `\n  <meta http-equiv="refresh" content="0; url=${safeUrl}">` : '';
+
 	return `<!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <meta http-equiv="refresh" content="0; url=${safeUrl}">
+  <meta charset="utf-8">${metaRefresh}
   <title>${safeTitle}</title>
 </head>
 <body style="font-family: system-ui, -apple-system, sans-serif; padding: 2rem; max-width: 600px; margin: 0 auto; line-height: 1.5;">

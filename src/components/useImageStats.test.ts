@@ -397,6 +397,7 @@ describe('fetchImageExtension', () => {
 
 		try {
 			expect(await fetchImageExtension('https://example.com/cors-blocked')).toBe('');
+			expect(await fetchImageExtension('blob:https://example.com/unreadable-blob')).toBe('');
 		} finally {
 			globalThis.fetch = originalFetch;
 		}

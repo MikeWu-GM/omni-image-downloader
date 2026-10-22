@@ -4,6 +4,9 @@ import { normalizeExtension } from './data.js';
 import { getImageExtension } from './useImageStats.js';
 
 const priorities = ['png', 'jpg', 'jpeg', 'bmp', 'webp', 'avif'];
+/** @type {Map<string, string>} */
+const normalizedKeyCache = new Map();
+const MAX_KEY_CACHE_SIZE = 2000;
 
 /**
  * @param {string[]} urls
@@ -11,7 +14,7 @@ const priorities = ['png', 'jpg', 'jpeg', 'bmp', 'webp', 'avif'];
  * @param {Record<string, { width: number; height: number }>} [imageDimensions]
  */
 export function deduplicateImages(urls, imagesCache, imageDimensions = {}) {
-	const keysByUrl = new Map(urls.map((url) => [url, getNormalizedBaseKey(url)]));
+	const keysByUrl = new Map(urls.map((url) => [url, getCachedNormalizedBaseKey(url)]));
 	const keys = new Set(keysByUrl.values());
 
 	const groups = new Map();
@@ -29,6 +32,19 @@ export function deduplicateImages(urls, imagesCache, imageDimensions = {}) {
 		}
 	}
 	return result;
+}
+
+function getCachedNormalizedBaseKey(/** @type {string} */ url) {
+	if (url.startsWith('data:')) return url;
+	const cached = normalizedKeyCache.get(url);
+	if (cached !== undefined) return cached;
+	const computedKey = getNormalizedBaseKey(url);
+	if (normalizedKeyCache.size >= MAX_KEY_CACHE_SIZE) {
+		const firstKey = normalizedKeyCache.keys().next().value;
+		if (firstKey !== undefined) normalizedKeyCache.delete(firstKey);
+	}
+	normalizedKeyCache.set(url, computedKey);
+	return computedKey;
 }
 
 // A bare `-<digits>` suffix (`banner-1920`) is a width only when the unsuffixed image

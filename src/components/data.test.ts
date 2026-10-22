@@ -200,20 +200,41 @@ describe('useOptions', () => {
 			expect(typeof stored.show_advanced_filters).toBe('boolean');
 		});
 
-		it('should store arrays as arrays', async () => {
+		it('should store arrays as arrays and exclude transient data:/blob: URLs from storage persistence', async () => {
 			await initialize();
 
-			selectedImages.value = ['img1.jpg', 'img2.jpg'];
+			selectedImages.value = [
+				'https://example.com/img1.jpg',
+				'data:image/png;base64,' + 'A'.repeat(10000),
+				'blob:https://example.com/1234',
+				'https://example.com/img2.jpg',
+			];
 			await new Promise((resolve) => setTimeout(resolve, 0));
 
+			// In-memory signal keeps all selected images so download works
+			expect(selectedImages.value).toHaveLength(4);
+
+			// Persistent storage only keeps non-transient URLs to prevent quota overflow
 			const stored = await chrome.storage.local.get(['selected_images']);
-			expect(stored.selected_images).toEqual(['img1.jpg', 'img2.jpg']);
+			expect(stored.selected_images).toEqual(['https://example.com/img1.jpg', 'https://example.com/img2.jpg']);
 			expect(Array.isArray(stored.selected_images)).toBe(true);
 		});
 	});
 });
 
 describe('matchingImages', () => {
+	it('should prevent ReDoS on long data: URLs with multiple wildcards', () => {
+		imagesCache.value = document.createElement('div');
+		const hugeDataUrl = 'data:image/png;base64,' + 'a'.repeat(50000) + '!';
+		allImages.value = [hugeDataUrl, 'https://example.com/photo.png'];
+
+		filterUrlMode.value = 'wildcard';
+		filterUrl.value = 'a*a*a*a*a*a*a*b';
+
+		const start = performance.now();
+		expect(matchingImages.value).toEqual([]);
+		expect(performance.now() - start).toBeLessThan(50);
+	});
 	it('should include an image whose URL contains a double quote', () => {
 		const url = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"/>';
 		const cache = document.createElement('div');

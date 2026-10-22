@@ -50,8 +50,9 @@ function AppWithoutErrorBoundary() {
 					<img
 						key=${url}
 						src=${url}
-						onLoad=${() => {
-							imageLoaded(url);
+						onLoad=${(/** @type {Event} */ e) => {
+							const img = /** @type {HTMLImageElement} */ (e.currentTarget);
+							imageLoaded(url, img.naturalWidth, img.naturalHeight);
 							if (!getImageExtension(url) && !detectedImageExtensions.peek()[url]) {
 								fetchImageExtension(url).then((ext) => {
 									if (ext) updateDetectedExtension(url, ext);

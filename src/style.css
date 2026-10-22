@@ -152,7 +152,9 @@
 	border-radius: 50%;
 	@apply border border-sky-600;
 	@apply bg-sky-600;
-	transition: all 200ms;
+	transition:
+		background-color 200ms,
+		border-color 200ms;
 }
 
 .noUi-horizontal .noUi-origin[disabled] .noUi-handle {
@@ -166,7 +168,7 @@
 	top: 4px;
 	height: 10px;
 	background-color: white;
-	transition: all 200ms;
+	transition: background-color 200ms;
 }
 
 .noUi-origin[disabled] .noUi-handle::before,

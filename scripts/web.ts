@@ -1,7 +1,9 @@
 import { globSync } from 'glob';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 
 import * as config from './config';
+
+const projectRoot = resolve(__dirname, '..');
 
 const mimeTypes: Record<string, string> = {
 	'.html': 'text/html',
@@ -22,6 +24,7 @@ const mimeTypes: Record<string, string> = {
 
 const port = parseInt(process.env.PORT || '') || 3000;
 Bun.serve({
+	hostname: '127.0.0.1',
 	port,
 	async fetch(request) {
 		const url = new URL(request.url);
@@ -34,7 +37,12 @@ Bun.serve({
 				}).includes(path.slice(1))
 			);
 
-		const file = Bun.file(join(__dirname, '..', (shouldServeFromBuild ? config.build : '') + path));
+		const targetPath = resolve(projectRoot, '.' + (shouldServeFromBuild ? `/${config.build}` : '') + path);
+		if (!targetPath.startsWith(projectRoot + sep)) {
+			return new Response('Forbidden', { status: 403 });
+		}
+
+		const file = Bun.file(targetPath);
 
 		if (await file.exists()) {
 			console.log(`${request.method} ${url.href} 200`);
@@ -52,7 +60,6 @@ Bun.serve({
 				return new Response(html, {
 					headers: {
 						'Content-Type': contentType,
-						'Access-Control-Allow-Origin': '*',
 					},
 				});
 			}
@@ -60,7 +67,6 @@ Bun.serve({
 			return new Response(file, {
 				headers: {
 					'Content-Type': contentType,
-					'Access-Control-Allow-Origin': '*',
 				},
 			});
 		}
@@ -70,4 +76,4 @@ Bun.serve({
 	},
 });
 
-console.log(`Web server running at http://localhost:${port}`);
+console.log(`Web server running at http://127.0.0.1:${port}`);

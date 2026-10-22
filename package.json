@@ -6,9 +6,6 @@
 	"scripts": {
 		"dev": "bun start",
 		"web": "bun --watch scripts/web.ts",
-		"bun remote": "bun code & bun tailscale",
-		"code": "code-server --port=4095",
-		"tailscale": "tailscale serve reset && tailscale serve --bg --http=3001 3000 && tailscale serve --bg --http=4096 4095",
 		"start": "bun run build && bun scripts/watch.ts",
 		"build": "bun scripts/build.ts && bun run build:zip",
 		"build:zip": "bun scripts/task.ts buildZip",
