@@ -78,6 +78,32 @@ if (chrome.sidePanel) {
 /** @type {Map<number, Task>} */
 const tasksByDownloadId = new Map();
 
+const MAX_CONCURRENT_DOWNLOADS = 4;
+let activeDownloadsCount = 0;
+/** @type {Set<number>} */
+const inFlightDownloadIds = new Set();
+/** @type {((value?: any) => void)[]} */
+const downloadQueue = [];
+
+function runWithDownloadSlot(/** @type {() => Promise<void>} */ fn) {
+	if (activeDownloadsCount < MAX_CONCURRENT_DOWNLOADS) {
+		activeDownloadsCount += 1;
+		return fn();
+	}
+	return new Promise((/** @type {(value?: any) => void} */ resolve) => {
+		downloadQueue.push(resolve);
+	}).then(fn);
+}
+
+function releaseDownloadSlot() {
+	const next = downloadQueue.shift();
+	if (next) {
+		next();
+	} else if (activeDownloadsCount > 0) {
+		activeDownloadsCount -= 1;
+	}
+}
+
 // Chromium ignores the `filename` passed to `downloads.download()` by other
 // extensions whenever any extension listens for `onDeterminingFilename`, so only
 // listen while Image Downloader is itself downloading.
@@ -132,44 +158,54 @@ async function downloadImages(/** @type {Task} */ task) {
 	ensureFilenameListener();
 
 	try {
-		const promises = task.imagesToDownload.map((image, index) => {
-			return new Promise((/** @type {(response?: any) => void} */ resolve) => {
-				const downloadOptions = canSuggestFilename() ? { url: image } : withFilename(task, index, image);
-				chrome.downloads.download(downloadOptions, (downloadId) => {
-					if (downloadId != null) {
-						task.indices.set(downloadId, index);
-						tasksByDownloadId.set(downloadId, task);
-					} else {
-						if (chrome.runtime.lastError) {
-							console.warn(`${image}:`, chrome.runtime.lastError.message);
-						}
-					}
-					resolve();
-				});
-			});
-		});
+		const promises = task.imagesToDownload.map((image, index) =>
+			runWithDownloadSlot(
+				() =>
+					new Promise((/** @type {(response?: any) => void} */ resolve) => {
+						const downloadOptions = canSuggestFilename() ? { url: image } : withFilename(task, index, image);
+						chrome.downloads.download(downloadOptions, (downloadId) => {
+							if (downloadId != null) {
+								inFlightDownloadIds.add(downloadId);
+								task.indices.set(downloadId, index);
+								tasksByDownloadId.set(downloadId, task);
+							} else {
+								releaseDownloadSlot();
+								if (chrome.runtime.lastError) {
+									console.warn(`${image}:`, chrome.runtime.lastError.message);
+								}
+							}
+							resolve();
+						});
+					})
+			)
+		);
 
 		if (task.options?.source_url_file) {
 			const { url, filename } = task.options.source_url_file;
 			promises.push(
-				new Promise((/** @type {(response?: any) => void} */ resolve) => {
-					/** @type {chrome.downloads.DownloadOptions} */
-					const downloadOptions = canSuggestFilename()
-						? { url }
-						: { url, filename: normalizeSlashes(filename), conflictAction: 'uniquify' };
-					chrome.downloads.download(downloadOptions, (downloadId) => {
-						if (downloadId != null) {
-							task.sourceDownloadId = downloadId;
-							task.sourceFilename = normalizeSlashes(filename);
-							tasksByDownloadId.set(downloadId, task);
-						} else {
-							if (chrome.runtime.lastError) {
-								console.warn(`${filename}:`, chrome.runtime.lastError.message);
-							}
-						}
-						resolve();
-					});
-				})
+				runWithDownloadSlot(
+					() =>
+						new Promise((/** @type {(response?: any) => void} */ resolve) => {
+							/** @type {chrome.downloads.DownloadOptions} */
+							const downloadOptions = canSuggestFilename()
+								? { url }
+								: { url, filename: normalizeSlashes(filename), conflictAction: 'uniquify' };
+							chrome.downloads.download(downloadOptions, (downloadId) => {
+								if (downloadId != null) {
+									inFlightDownloadIds.add(downloadId);
+									task.sourceDownloadId = downloadId;
+									task.sourceFilename = normalizeSlashes(filename);
+									tasksByDownloadId.set(downloadId, task);
+								} else {
+									releaseDownloadSlot();
+									if (chrome.runtime.lastError) {
+										console.warn(`${filename}:`, chrome.runtime.lastError.message);
+									}
+								}
+								resolve();
+							});
+						})
+				)
 			);
 		}
 
@@ -264,6 +300,9 @@ function buildFilename(
 
 function cleanupCompletedDownloadTasks(/** @type {chrome.downloads.DownloadDelta} */ delta) {
 	if (delta.state?.current === 'complete' || delta.state?.current === 'interrupted') {
+		if (inFlightDownloadIds.delete(delta.id)) {
+			releaseDownloadSlot();
+		}
 		tasksByDownloadId.delete(delta.id);
 		removeFilenameListenerIfIdle();
 	}

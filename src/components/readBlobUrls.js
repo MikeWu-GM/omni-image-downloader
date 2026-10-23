@@ -4,24 +4,37 @@
 // a Firefox content script fetches as the extension.
 
 /** @returns {Promise<string[]>} A `data:` URL for each blob URL, or the blob URL itself if it can't be read */
-export function readBlobUrls(/** @type {string[]} */ urls, /** @type {number} */ maxBytes = 50 * 1024 * 1024) {
-	return Promise.all(
-		urls.map(async (url) => {
-			try {
-				const blob = await (await fetch(url)).blob();
-				if (!blob.type.startsWith('image/') || blob.size > maxBytes) {
-					return url;
-				}
-				const bytes = new Uint8Array(await blob.arrayBuffer());
-				let binary = '';
-				// Chunked, because spreading a whole image into `fromCharCode` overflows the call stack
-				for (let index = 0; index < bytes.length; index += 0x8000) {
-					binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-				}
-				return `data:${blob.type};base64,${btoa(binary)}`;
-			} catch {
+export async function readBlobUrls(/** @type {string[]} */ urls, /** @type {number} */ maxBytes = 50 * 1024 * 1024) {
+	const results = /** @type {string[]} */ (new Array(urls.length));
+	let nextIndex = 0;
+
+	async function readSingle(/** @type {string} */ url) {
+		try {
+			const blob = await (await fetch(url)).blob();
+			if (!blob.type.startsWith('image/') || blob.size > maxBytes) {
 				return url;
+			}
+			const bytes = new Uint8Array(await blob.arrayBuffer());
+			let binary = '';
+			// Chunked, because spreading a whole image into `fromCharCode` overflows the call stack
+			for (let index = 0; index < bytes.length; index += 0x8000) {
+				binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+			}
+			return `data:${blob.type};base64,${btoa(binary)}`;
+		} catch {
+			return url;
+		}
+	}
+
+	const workerCount = Math.min(4, urls.length);
+	await Promise.all(
+		Array.from({ length: workerCount }, async () => {
+			while (nextIndex < urls.length) {
+				const currentIndex = nextIndex++;
+				results[currentIndex] = await readSingle(urls[currentIndex]);
 			}
 		})
 	);
+
+	return results;
 }

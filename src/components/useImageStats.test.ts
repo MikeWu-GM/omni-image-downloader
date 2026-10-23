@@ -402,4 +402,52 @@ describe('fetchImageExtension', () => {
 			globalThis.fetch = originalFetch;
 		}
 	});
+
+	it('throttles concurrent extension fetches to 4 and coalesces duplicate in-flight URLs', async () => {
+		let inFlight = 0;
+		let maxInFlight = 0;
+		let totalCalls = 0;
+		const resolvers: (() => void)[] = [];
+
+		globalThis.fetch = (async () => {
+			totalCalls += 1;
+			inFlight += 1;
+			maxInFlight = Math.max(maxInFlight, inFlight);
+			await new Promise<void>((resolve) => resolvers.push(resolve));
+			inFlight -= 1;
+			return {
+				ok: true,
+				headers: new Headers({ 'content-type': 'image/png' }),
+			};
+		}) as any;
+
+		try {
+			const urls = [
+				'https://example.com/no-ext-1',
+				'https://example.com/no-ext-1', // duplicate in-flight URL
+				'https://example.com/no-ext-2',
+				'https://example.com/no-ext-3',
+				'https://example.com/no-ext-4',
+				'https://example.com/no-ext-5',
+				'https://example.com/no-ext-6',
+			];
+			const promises = urls.map((u) => fetchImageExtension(u));
+
+			await new Promise((r) => setTimeout(r, 10));
+			expect(inFlight).toBe(4);
+			expect(maxInFlight).toBe(4);
+
+			while (resolvers.length > 0) {
+				resolvers.shift()!();
+				await new Promise((r) => setTimeout(r, 5));
+			}
+
+			const results = await Promise.all(promises);
+			expect(maxInFlight).toBe(4);
+			expect(totalCalls).toBe(6);
+			expect(results).toEqual(['png', 'png', 'png', 'png', 'png', 'png', 'png']);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
 });

@@ -235,6 +235,37 @@ describe('serviceWorker cleanup completed tasks', () => {
 
 		expect(chrome.downloads.onDeterminingFilename.listeners.size).toBe(0);
 	});
+
+	it('throttles concurrent downloads to MAX_CONCURRENT_DOWNLOADS (4) and advances queue as downloads complete or fail', async () => {
+		const urls = [
+			'https://example.com/1.jpg',
+			'https://example.com/2.jpg',
+			'https://example.com/3.jpg',
+			'https://example.com/4.jpg',
+			'https://example.com/5.jpg',
+			'https://example.com/6.jpg',
+		];
+
+		const done = startBatch(urls);
+		await new Promise((r) => setTimeout(r, 10));
+
+		// Only the first 4 downloads should have been started immediately
+		expect(chrome.downloads.download).toHaveBeenCalledTimes(4);
+
+		const onChangedListener = [...chrome.downloads.onChanged.listeners][0] as (delta: any) => void;
+
+		// Completing download 1 frees 1 slot -> download 5 starts
+		onChangedListener({ id: downloadIds[0], state: { current: 'complete' } });
+		await new Promise((r) => setTimeout(r, 10));
+		expect(chrome.downloads.download).toHaveBeenCalledTimes(5);
+
+		// Interrupting download 2 frees 1 slot -> download 6 starts
+		onChangedListener({ id: downloadIds[1], state: { current: 'interrupted' } });
+		await new Promise((r) => setTimeout(r, 10));
+		expect(chrome.downloads.download).toHaveBeenCalledTimes(6);
+
+		await done;
+	});
 });
 
 describe('serviceWorker open_mode dynamic updates and installation', () => {

@@ -226,36 +226,74 @@ const mimeExtensions = {
 	'image/vnd.microsoft.icon': 'ico',
 };
 
-/** @returns {Promise<string>} */
-export async function fetchImageExtension(/** @type {string} */ url) {
-	if (!url) return '';
+const MAX_CONCURRENT_EXTENSION_FETCHES = 4;
+let activeExtensionFetches = 0;
+/** @type {((value?: any) => void)[]} */
+const extensionFetchQueue = [];
+/** @type {Map<string, Promise<string>>} */
+const inFlightExtensionFetches = new Map();
 
-	try {
-		// Blob URLs: fetch the blob and read its type property
-		if (url.startsWith('blob:')) {
-			const response = await fetch(url);
-			const blob = await response.blob();
-			return mimeExtensions[blob.type] || blob.type.replace('image/', '') || '';
-		}
-
-		// Try HEAD request from browser cache
-		const response = await fetch(url, {
-			method: 'HEAD',
-			cache: 'force-cache',
-		});
-
-		if (response.ok) {
-			const contentType = response.headers.get('content-type');
-			if (contentType) {
-				const mime = contentType.split(';')[0].trim().toLowerCase();
-				return mimeExtensions[mime] || (mime.startsWith('image/') ? mime.replace('image/', '') : '');
-			}
-		}
-	} catch {
-		// CORS blocked, unreadable blob, or network error
+function acquireExtensionFetchSlot() {
+	if (activeExtensionFetches < MAX_CONCURRENT_EXTENSION_FETCHES) {
+		activeExtensionFetches += 1;
+		return Promise.resolve();
 	}
+	return new Promise((/** @type {(value?: any) => void} */ resolve) => {
+		extensionFetchQueue.push(resolve);
+	});
+}
 
-	return '';
+function releaseExtensionFetchSlot() {
+	const next = extensionFetchQueue.shift();
+	if (next) {
+		next();
+	} else if (activeExtensionFetches > 0) {
+		activeExtensionFetches -= 1;
+	}
+}
+
+/** @returns {Promise<string>} */
+export function fetchImageExtension(/** @type {string} */ url) {
+	if (!url) return Promise.resolve('');
+
+	const existing = inFlightExtensionFetches.get(url);
+	if (existing) return existing;
+
+	const promise = (async () => {
+		await acquireExtensionFetchSlot();
+		try {
+			// Blob URLs: fetch the blob and read its type property
+			if (url.startsWith('blob:')) {
+				const response = await fetch(url);
+				const blob = await response.blob();
+				return mimeExtensions[blob.type] || blob.type.replace('image/', '') || '';
+			}
+
+			// Try HEAD request from browser cache
+			const response = await fetch(url, {
+				method: 'HEAD',
+				cache: 'force-cache',
+			});
+
+			if (response.ok) {
+				const contentType = response.headers.get('content-type');
+				if (contentType) {
+					const mime = contentType.split(';')[0].trim().toLowerCase();
+					return mimeExtensions[mime] || (mime.startsWith('image/') ? mime.replace('image/', '') : '');
+				}
+			}
+		} catch {
+			// CORS blocked, unreadable blob, or network error
+		} finally {
+			releaseExtensionFetchSlot();
+			inFlightExtensionFetches.delete(url);
+		}
+
+		return '';
+	})();
+
+	inFlightExtensionFetches.set(url, promise);
+	return promise;
 }
 
 /** @returns {ImageSize | null} */
