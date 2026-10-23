@@ -5,9 +5,13 @@ chrome.runtime.onInstalled.addListener(async () => {
 	await updateActionPopup();
 });
 
-// Handle storage changes to update popup state
+// Handle storage changes to update popup state and concurrency limit
 chrome.storage.onChanged.addListener(async (changes, areaName) => {
-	if (areaName === 'local' && changes.open_mode) {
+	if (areaName !== 'local') return;
+	if (changes.max_concurrent_downloads) {
+		setMaxConcurrentDownloads(changes.max_concurrent_downloads.newValue);
+	}
+	if (changes.open_mode) {
 		await updateActionPopup();
 	}
 });
@@ -22,7 +26,13 @@ if (chrome.sidePanel?.setOptions) {
 }
 
 async function updateActionPopup() {
-	const { open_mode = 'sidebar' } = await chrome.storage.local.get('open_mode');
+	const { open_mode = 'sidebar', max_concurrent_downloads } = await chrome.storage.local.get([
+		'open_mode',
+		'max_concurrent_downloads',
+	]);
+	if (max_concurrent_downloads != null) {
+		setMaxConcurrentDownloads(max_concurrent_downloads);
+	}
 	// Some Chromium-based browsers (e.g. Opera) don't implement the sidePanel
 	// API. Fall back to the popup so the extension stays functional there.
 	if (open_mode === 'sidebar' && chrome.sidePanel) {
@@ -78,15 +88,33 @@ if (chrome.sidePanel) {
 /** @type {Map<number, Task>} */
 const tasksByDownloadId = new Map();
 
-const MAX_CONCURRENT_DOWNLOADS = 4;
+let maxConcurrentDownloads = 4;
 let activeDownloadsCount = 0;
 /** @type {Set<number>} */
 const inFlightDownloadIds = new Set();
 /** @type {((value?: any) => void)[]} */
 const downloadQueue = [];
 
+function setMaxConcurrentDownloads(/** @type {any} */ value) {
+	const parsed = Math.trunc(Number(value));
+	if (!isNaN(parsed) && parsed >= 1) {
+		maxConcurrentDownloads = Math.min(20, Math.max(1, parsed));
+		drainDownloadQueue();
+	}
+}
+
+function drainDownloadQueue() {
+	while (activeDownloadsCount < maxConcurrentDownloads && downloadQueue.length > 0) {
+		const next = downloadQueue.shift();
+		if (next) {
+			activeDownloadsCount += 1;
+			next();
+		}
+	}
+}
+
 function runWithDownloadSlot(/** @type {() => Promise<void>} */ fn) {
-	if (activeDownloadsCount < MAX_CONCURRENT_DOWNLOADS) {
+	if (activeDownloadsCount < maxConcurrentDownloads) {
 		activeDownloadsCount += 1;
 		return fn();
 	}
@@ -96,12 +124,10 @@ function runWithDownloadSlot(/** @type {() => Promise<void>} */ fn) {
 }
 
 function releaseDownloadSlot() {
-	const next = downloadQueue.shift();
-	if (next) {
-		next();
-	} else if (activeDownloadsCount > 0) {
+	if (activeDownloadsCount > 0) {
 		activeDownloadsCount -= 1;
 	}
+	drainDownloadQueue();
 }
 
 // Chromium ignores the `filename` passed to `downloads.download()` by other
@@ -154,6 +180,9 @@ function startDownload(
 }
 
 async function downloadImages(/** @type {Task} */ task) {
+	if (task.options?.max_concurrent_downloads != null) {
+		setMaxConcurrentDownloads(task.options.max_concurrent_downloads);
+	}
 	activeBatchCount += 1;
 	ensureFilenameListener();
 

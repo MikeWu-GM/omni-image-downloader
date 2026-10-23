@@ -5,6 +5,7 @@ import {
 	downloadConfirmationIsShown,
 	downloadIsInProgress,
 	folderName,
+	maxConcurrentDownloads,
 	newFileName,
 	pageTitle,
 	pageUrl,
@@ -48,6 +49,7 @@ export const downloadImages = (/** @type {string[]} */ imagesToDownload) =>
 					folder_name: folderName.value,
 					new_file_name: newFileName.value,
 					source_url_file: sourceUrlFile,
+					max_concurrent_downloads: maxConcurrentDownloads.value,
 				},
 			},
 			resolve

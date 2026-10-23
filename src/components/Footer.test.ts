@@ -72,4 +72,25 @@ describe('Footer component', () => {
 		cancelBtn!.click();
 		expect(downloadConfirmationIsShown.value).toBe(false);
 	});
+
+	it('exposes max_concurrent_downloads input in Footer and clamps values between 1 and 20', async () => {
+		const dataModule = await import('./data.js');
+		render(html`<${Footer} />`, container);
+
+		const concurrencyInput = container.querySelector('#max_concurrent_downloads_input') as HTMLInputElement;
+		expect(concurrencyInput).not.toBeNull();
+		expect(concurrencyInput.value).toBe('4');
+
+		concurrencyInput.value = '8';
+		concurrencyInput.dispatchEvent(new (window as any).Event('change'));
+		expect((dataModule as any).maxConcurrentDownloads?.value).toBe(8);
+
+		concurrencyInput.value = '99';
+		concurrencyInput.dispatchEvent(new (window as any).Event('change'));
+		expect((dataModule as any).maxConcurrentDownloads?.value).toBe(20);
+
+		concurrencyInput.value = '0';
+		concurrencyInput.dispatchEvent(new (window as any).Event('change'));
+		expect((dataModule as any).maxConcurrentDownloads?.value).toBe(1);
+	});
 });

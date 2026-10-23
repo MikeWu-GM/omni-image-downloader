@@ -46,6 +46,7 @@ export const defaults = {
 	new_file_name: '',
 	show_download_confirmation: true,
 	save_source_url: true,
+	max_concurrent_downloads: 4,
 	// Images
 	selected_images: /** @type {string[]} */ ([]),
 	columns: 2,
@@ -145,6 +146,8 @@ export const showDownloadConfirmation = storedSignal('show_download_confirmation
 
 export const saveSourceUrl = storedSignal('save_source_url');
 
+export const maxConcurrentDownloads = storedSignal('max_concurrent_downloads');
+
 export const downloadIsInProgress = signal(false);
 export const downloadConfirmationIsShown = signal(false);
 
@@ -184,6 +187,7 @@ export const initialize = action(async () => {
 		new_file_name: newFileName,
 		show_download_confirmation: showDownloadConfirmation,
 		save_source_url: saveSourceUrl,
+		max_concurrent_downloads: maxConcurrentDownloads,
 		selected_images: selectedImages,
 		columns: columns,
 	};

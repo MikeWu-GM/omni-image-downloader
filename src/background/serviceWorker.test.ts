@@ -266,6 +266,32 @@ describe('serviceWorker cleanup completed tasks', () => {
 
 		await done;
 	});
+
+	it('respects custom max_concurrent_downloads passed in options or updated via storage', async () => {
+		const urls = [
+			'https://example.com/1.jpg',
+			'https://example.com/2.jpg',
+			'https://example.com/3.jpg',
+			'https://example.com/4.jpg',
+		];
+
+		const done = startBatch(urls, { max_concurrent_downloads: 2 });
+		await new Promise((r) => setTimeout(r, 10));
+
+		// With custom limit 2, only 2 downloads should start initially
+		expect(chrome.downloads.download).toHaveBeenCalledTimes(2);
+
+		// Dynamically raising max_concurrent_downloads via storage immediately drains queued slots
+		const storageListener = [...chrome.storage.onChanged.listeners][0] as (
+			changes: Record<string, any>,
+			areaName: string
+		) => Promise<void>;
+		await storageListener({ max_concurrent_downloads: { newValue: 4 } }, 'local');
+		await new Promise((r) => setTimeout(r, 10));
+
+		expect(chrome.downloads.download).toHaveBeenCalledTimes(4);
+		await done;
+	});
 });
 
 describe('serviceWorker open_mode dynamic updates and installation', () => {
