@@ -87,20 +87,20 @@ export function Footer(/** @type {Object} */ props) {
 									Save source URL (source.html)
 								<//>
 
-								<label class="flex items-center gap-1" title="Maximum number of simultaneous downloads (1–20)">
+								<label class="flex items-center gap-1" title="Maximum number of simultaneous downloads (1–128)">
 									<span>Max concurrent:</span>
 									<input
 										id="max_concurrent_downloads_input"
 										type="number"
 										min="1"
-										max="20"
+										max="128"
 										step="1"
-										class="w-12 rounded border border-slate-300 bg-white px-1 py-0.5 text-center dark:border-slate-600 dark:bg-slate-900"
+										class="w-14 rounded border border-slate-300 bg-white px-1 py-0.5 text-center dark:border-slate-600 dark:bg-slate-900"
 										value=${maxConcurrentDownloads}
 										onChange=${(/** @type {Event} */ e) => {
 											const input = /** @type {HTMLInputElement} */ (e.currentTarget);
 											const raw = parseInt(input.value, 10);
-											const clamped = isNaN(raw) ? 4 : Math.min(20, Math.max(1, raw));
+											const clamped = isNaN(raw) ? 4 : Math.min(128, Math.max(1, raw));
 											maxConcurrentDownloads.value = clamped;
 											input.value = String(clamped);
 										}}

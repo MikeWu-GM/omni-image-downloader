@@ -816,7 +816,14 @@ describe('currentSelectedImages', () => {
 			};
 			chrome.scripting = {
 				executeScript: mock(async () => [
-					{ result: { allImages: ['https://site-one.com/img.jpg'], linkedImages: [], imageDimensions: {}, title: 'Tab One' } },
+					{
+						result: {
+							allImages: ['https://site-one.com/img.jpg'],
+							linkedImages: [],
+							imageDimensions: {},
+							title: 'Tab One',
+						},
+					},
 				]),
 			};
 

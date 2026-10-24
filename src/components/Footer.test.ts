@@ -73,7 +73,7 @@ describe('Footer component', () => {
 		expect(downloadConfirmationIsShown.value).toBe(false);
 	});
 
-	it('exposes max_concurrent_downloads input in Footer and clamps values between 1 and 20', async () => {
+	it('exposes max_concurrent_downloads input in Footer and clamps values between 1 and 128', async () => {
 		const dataModule = await import('./data.js');
 		render(html`<${Footer} />`, container);
 
@@ -87,7 +87,11 @@ describe('Footer component', () => {
 
 		concurrencyInput.value = '99';
 		concurrencyInput.dispatchEvent(new (window as any).Event('change'));
-		expect((dataModule as any).maxConcurrentDownloads?.value).toBe(20);
+		expect((dataModule as any).maxConcurrentDownloads?.value).toBe(99);
+
+		concurrencyInput.value = '200';
+		concurrencyInput.dispatchEvent(new (window as any).Event('change'));
+		expect((dataModule as any).maxConcurrentDownloads?.value).toBe(128);
 
 		concurrencyInput.value = '0';
 		concurrencyInput.dispatchEvent(new (window as any).Event('change'));

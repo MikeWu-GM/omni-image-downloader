@@ -98,7 +98,7 @@ const downloadQueue = [];
 function setMaxConcurrentDownloads(/** @type {any} */ value) {
 	const parsed = Math.trunc(Number(value));
 	if (!isNaN(parsed) && parsed >= 1) {
-		maxConcurrentDownloads = Math.min(20, Math.max(1, parsed));
+		maxConcurrentDownloads = Math.min(128, Math.max(1, parsed));
 		drainDownloadQueue();
 	}
 }
