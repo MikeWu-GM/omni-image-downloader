@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { escapeHtml, generateSourceHtml, sanitizeFolderName } from './utils.js';
+import { disambiguateFolderNames, escapeHtml, generateSourceHtml, sanitizeFolderName } from './utils.js';
 
 describe('escapeHtml', () => {
 	it('escapes HTML special characters to prevent XSS injection', () => {
@@ -36,6 +36,12 @@ describe('sanitizeFolderName', () => {
 		expect(sanitizeFolderName('')).toBe('images');
 		expect(sanitizeFolderName('   ')).toBe('images');
 	});
+
+	it('disambiguates identical folder names with numeric suffixes', () => {
+		const rawNames = ['Auth Login', 'Auth Login', 'Gallery', 'Auth Login', 'Gallery'];
+		const uniqueNames = disambiguateFolderNames(rawNames);
+		expect(uniqueNames).toEqual(['Auth Login', 'Auth Login (2)', 'Gallery', 'Auth Login (3)', 'Gallery (2)']);
+	});
 });
 
 describe('generateSourceHtml', () => {
@@ -60,5 +66,36 @@ describe('generateSourceHtml', () => {
 		expect(html).not.toContain('javascript:');
 		expect(html).not.toContain('http-equiv="refresh"');
 		expect(html).toContain('href="#"');
+	});
+});
+
+describe('measurePerf & getPerfReport', () => {
+	it('records synchronous execution duration and aggregates metrics', () => {
+		const { measurePerf, getPerfReport } = require('./utils.js');
+
+		const result = measurePerf('test:sync', () => {
+			let sum = 0;
+			for (let i = 0; i < 1000; i++) sum += i;
+			return sum;
+		});
+
+		expect(result).toBe(499500);
+		const report = getPerfReport();
+		expect(report['test:sync']).toBeDefined();
+		expect(report['test:sync'].count).toBe(1);
+	});
+
+	it('records asynchronous promise duration and updates window diagnostics', async () => {
+		const { measurePerf, getPerfReport } = require('./utils.js');
+
+		const asyncResult = await measurePerf('test:async', async () => {
+			await new Promise((r) => setTimeout(r, 15));
+			return 'async-done';
+		});
+
+		expect(asyncResult).toBe('async-done');
+		const report = getPerfReport();
+		expect(report['test:async']).toBeDefined();
+		expect(report['test:async'].count).toBe(1);
 	});
 });

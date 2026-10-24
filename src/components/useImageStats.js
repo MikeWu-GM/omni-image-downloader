@@ -1,5 +1,6 @@
 // @ts-check
 import { useSignal } from '../html.js';
+import { measurePerf } from '../utils.js';
 
 /**
  * @typedef {Object} ImageSize
@@ -232,6 +233,20 @@ let activeExtensionFetches = 0;
 const extensionFetchQueue = [];
 /** @type {Map<string, Promise<string>>} */
 const inFlightExtensionFetches = new Map();
+/** @type {Set<string>} */
+const corsBlockedHostnames = new Set();
+
+export function resetCorsBlockedHostnames() {
+	corsBlockedHostnames.clear();
+}
+
+function getUrlHostname(/** @type {string} */ url) {
+	try {
+		return new URL(url).hostname;
+	} catch {
+		return '';
+	}
+}
 
 function acquireExtensionFetchSlot() {
 	if (activeExtensionFetches < MAX_CONCURRENT_EXTENSION_FETCHES) {
@@ -256,40 +271,61 @@ function releaseExtensionFetchSlot() {
 export function fetchImageExtension(/** @type {string} */ url) {
 	if (!url) return Promise.resolve('');
 
+	const isBlob = url.startsWith('blob:');
+	const hostname = isBlob ? '' : getUrlHostname(url);
+	if (hostname && corsBlockedHostnames.has(hostname)) {
+		return Promise.resolve('');
+	}
+
 	const existing = inFlightExtensionFetches.get(url);
 	if (existing) return existing;
 
 	const promise = (async () => {
 		await acquireExtensionFetchSlot();
-		try {
-			// Blob URLs: fetch the blob and read its type property
-			if (url.startsWith('blob:')) {
-				const response = await fetch(url);
-				const blob = await response.blob();
-				return mimeExtensions[blob.type] || blob.type.replace('image/', '') || '';
-			}
+		return measurePerf(`stats:fetchImageExtension(${url.slice(0, 30)})`, async () => {
+			/** @type {AbortController | null} */
+			let controller = null;
+			/** @type {ReturnType<typeof setTimeout> | null} */
+			let timeoutTimer = null;
 
-			// Try HEAD request from browser cache
-			const response = await fetch(url, {
-				method: 'HEAD',
-				cache: 'force-cache',
-			});
-
-			if (response.ok) {
-				const contentType = response.headers.get('content-type');
-				if (contentType) {
-					const mime = contentType.split(';')[0].trim().toLowerCase();
-					return mimeExtensions[mime] || (mime.startsWith('image/') ? mime.replace('image/', '') : '');
+			try {
+				// Blob URLs: fetch the blob and read its type property
+				if (isBlob) {
+					const response = await fetch(url);
+					const blob = await response.blob();
+					return mimeExtensions[blob.type] || blob.type.replace('image/', '') || '';
 				}
-			}
-		} catch {
-			// CORS blocked, unreadable blob, or network error
-		} finally {
-			releaseExtensionFetchSlot();
-			inFlightExtensionFetches.delete(url);
-		}
 
-		return '';
+				controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+				timeoutTimer = controller ? setTimeout(() => controller?.abort(), 1500) : null;
+
+				// Try HEAD request from browser cache
+				const response = await fetch(url, {
+					method: 'HEAD',
+					cache: 'force-cache',
+					signal: controller?.signal,
+				});
+
+				if (response.ok) {
+					const contentType = response.headers.get('content-type');
+					if (contentType) {
+						const mime = contentType.split(';')[0].trim().toLowerCase();
+						return mimeExtensions[mime] || (mime.startsWith('image/') ? mime.replace('image/', '') : '');
+					}
+				}
+			} catch {
+				// CORS blocked, timeout, unreadable blob, or network error
+				if (hostname) {
+					corsBlockedHostnames.add(hostname);
+				}
+			} finally {
+				if (timeoutTimer != null) clearTimeout(timeoutTimer);
+				releaseExtensionFetchSlot();
+				inFlightExtensionFetches.delete(url);
+			}
+
+			return '';
+		});
 	})();
 
 	inFlightExtensionFetches.set(url, promise);

@@ -1,7 +1,17 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import html, { render } from '../html.js';
 import { mockChrome, mockDOM } from '../test-helpers.js';
-import { allImages, columns, displayedImages, imagesCache, selectedImages, tab } from './data.js';
+import {
+	allImages,
+	columns,
+	displayedImages,
+	extractionScope,
+	groupByTab,
+	imagesCache,
+	selectedImages,
+	tab,
+	tabGroups,
+} from './data.js';
 import { Images } from './Images.js';
 
 mockDOM();
@@ -21,16 +31,30 @@ describe('Images component', () => {
 		tab.value = 'matching';
 		columns.value = 2;
 		selectedImages.value = [];
+		extractionScope.value = 'current_tab';
+		groupByTab.value = true;
+		tabGroups.value = [];
 		allImages.value = ['https://example.com/1.png', 'https://example.com/2.png'];
 	});
 
-	it('renders image cards for displayed images with lazy loading and async decoding', () => {
+	afterEach(() => {
+		extractionScope.value = 'current_tab';
+		groupByTab.value = true;
+		tabGroups.value = [];
+	});
+
+	it('renders image cards for displayed images with lazy loading, async decoding, and contain-paint isolation without expensive drop-shadow filters', () => {
 		render(html`<${Images} />`, container);
 
-		const imgElements = container.querySelectorAll('img.drop-shadow-md');
+		const cards = container.querySelectorAll('.group.cursor-pointer');
+		expect(cards.length).toBe(2);
+		expect((cards[0] as HTMLElement).classList.contains('contain-paint')).toBe(true);
+
+		const imgElements = container.querySelectorAll('img');
 		expect(imgElements.length).toBe(2);
 		expect(imgElements[0].getAttribute('loading')).toBe('lazy');
 		expect(imgElements[0].getAttribute('decoding')).toBe('async');
+		expect(imgElements[0].classList.contains('drop-shadow-md')).toBe(false);
 	});
 
 	it('copies image URL to clipboard when copy button is clicked', async () => {
@@ -73,7 +97,7 @@ describe('Images component', () => {
 	it('shows error UI on image loading failure and allows retry', async () => {
 		render(html`<${Images} />`, container);
 
-		const firstImg = container.querySelector('img.drop-shadow-md') as HTMLImageElement;
+		const firstImg = container.querySelector('img') as HTMLImageElement;
 		expect(firstImg).not.toBeNull();
 
 		// Dispatch error event using window.Event
@@ -91,7 +115,7 @@ describe('Images component', () => {
 		await new Promise((resolve) => setTimeout(resolve, 50));
 
 		// After reset, img element should be restored
-		const restoredImg = container.querySelector('img.drop-shadow-md') as HTMLImageElement;
+		const restoredImg = container.querySelector('img') as HTMLImageElement;
 		expect(restoredImg).not.toBeNull();
 	});
 
@@ -126,5 +150,52 @@ describe('Images component', () => {
 
 		const externalLinks = container.querySelectorAll('a[href*="cutoutmagic"]');
 		expect(externalLinks.length).toBe(0);
+	});
+
+	it('renders tab groups with collapsible cards in current_window mode when groupByTab is true', () => {
+		extractionScope.value = 'current_window';
+		groupByTab.value = true;
+		tabGroups.value = [
+			{
+				id: 101,
+				title: 'Tab 101 Title',
+				url: 'https://site-a.com',
+				hostname: 'site-a.com',
+				favIconUrl: 'https://site-a.com/fav.png',
+				error: '',
+				folderName: 'Tab_101',
+				allImages: ['https://example.com/1.png'],
+				linkedImages: [],
+				imageDimensions: {},
+				status: 'loaded',
+				collapsed: false,
+				selected: true,
+			},
+			{
+				id: 102,
+				title: 'Tab 102 Title',
+				url: 'https://site-b.com',
+				hostname: 'site-b.com',
+				favIconUrl: '',
+				error: '',
+				folderName: 'Tab_102',
+				allImages: ['https://example.com/2.png'],
+				linkedImages: [],
+				imageDimensions: {},
+				status: 'loaded',
+				collapsed: true,
+				selected: true,
+			},
+		];
+
+		render(html`<${Images} />`, container);
+
+		const groupHeaders = container.querySelectorAll('.tab-group-header');
+		expect(groupHeaders.length).toBe(2);
+		expect(container.textContent).toContain('Tab 101 Title');
+		expect(container.textContent).toContain('Tab 102 Title');
+
+		const renderedCards = container.querySelectorAll('.group.cursor-pointer');
+		expect(renderedCards.length).toBe(1);
 	});
 });

@@ -22,6 +22,10 @@ import {
 	hostname,
 	limitedAccessHostnames,
 	loadImagesFromActiveTab,
+	loadImagesFromCurrentWindow,
+	extractionScope,
+	tabGroups,
+	setAllTabGroupsCollapsed,
 	onlyImagesFromLinks,
 	onlyUniqueImages,
 	openMode,
@@ -131,14 +135,103 @@ export function Header(/** @type {Object} */ props) {
 				</div>
 			<//>
 
+			<!-- Scope Switcher: Tab vs Window -->
+			<div
+				class="flex items-center justify-between border-b border-slate-200 bg-slate-50/70 px-2.5 py-1 text-xs dark:border-slate-800 dark:bg-slate-900/70"
+			>
+				<div
+					class="text-2xs flex items-center overflow-hidden rounded-md border border-slate-300 bg-slate-200/50 p-0.5 font-semibold dark:border-slate-700 dark:bg-slate-800/80"
+				>
+					<button
+						type="button"
+						class="${
+							extractionScope.value === 'current_tab'
+								? 'bg-white text-sky-700 shadow-xs dark:bg-slate-700 dark:text-sky-300'
+								: 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+						} flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 transition-colors"
+						title="Extract images from currently active tab only"
+						onClick=${() => {
+							if (extractionScope.value !== 'current_tab') {
+								extractionScope.value = 'current_tab';
+								loadImagesFromActiveTab({ waitForIdleDOM: 1 });
+							}
+						}}
+					>
+						<span>📄 Current Tab</span>
+					</button>
+
+					<button
+						type="button"
+						class="${
+							extractionScope.value === 'current_window'
+								? 'bg-white text-sky-700 shadow-xs dark:bg-slate-700 dark:text-sky-300'
+								: 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+						} flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 transition-colors"
+						title="Extract images from all tabs in current window"
+						onClick=${() => {
+							if (extractionScope.value !== 'current_window') {
+								extractionScope.value = 'current_window';
+								loadImagesFromCurrentWindow({ waitForIdleDOM: 1 });
+							}
+						}}
+					>
+						<span>🗂️ Current Window</span>
+						${
+							tabGroups.value.length > 0
+								? html`<span
+										class="text-3xs rounded-full bg-sky-100 px-1 text-sky-800 dark:bg-sky-900/80 dark:text-sky-200"
+									>
+										${tabGroups.value.length} Tabs
+									</span>`
+								: null
+						}
+					</button>
+				</div>
+
+				${
+					extractionScope.value === 'current_window'
+						? html`
+								<div class="text-3xs flex items-center gap-1">
+									<button
+										type="button"
+										class="cursor-pointer rounded border border-slate-300 px-1.5 py-0.5 font-medium text-slate-600 hover:bg-slate-200 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+										title="Collapse all tab groups"
+										onClick=${() => setAllTabGroupsCollapsed(true)}
+									>
+										Collapse All
+									</button>
+									<button
+										type="button"
+										class="cursor-pointer rounded border border-slate-300 px-1.5 py-0.5 font-medium text-slate-600 hover:bg-slate-200 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+										title="Expand all tab groups"
+										onClick=${() => setAllTabGroupsCollapsed(false)}
+									>
+										Expand All
+									</button>
+								</div>
+							`
+						: null
+				}
+			</div>
+
 			<!-- Pro Compact Filter Dock -->
 			<div class="flex flex-col gap-1 p-2">
 				<div class="flex items-center gap-1 text-xs">
 					<button
 						type="button"
-						class="flex size-7 min-w-7 items-center justify-center rounded border border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
-						title="Reload images from current tab"
-						onClick=${() => loadImagesFromActiveTab({ waitForIdleDOM: 1 })}
+						class="flex size-7 min-w-7 cursor-pointer items-center justify-center rounded border border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+						title=${
+							extractionScope.value === 'current_window'
+								? 'Reload images from all tabs in window'
+								: 'Reload images from current tab'
+						}
+						onClick=${() => {
+							if (extractionScope.value === 'current_window') {
+								loadImagesFromCurrentWindow({ waitForIdleDOM: 1 });
+							} else {
+								loadImagesFromActiveTab({ waitForIdleDOM: 1 });
+							}
+						}}
 					>
 						<img class="w-3" src="/images/reload.svg" />
 					</button>

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { beforeEach, describe, expect, it } from 'bun:test';
 import { h, render } from 'preact';
 import { mockDOM } from '../test-helpers';
 
@@ -7,10 +7,15 @@ import {
 	formatFileSize,
 	getImageExtension,
 	getImageResourceSize,
+	resetCorsBlockedHostnames,
 	useImageStats,
 } from './useImageStats.js';
 
 mockDOM();
+
+beforeEach(() => {
+	resetCorsBlockedHostnames();
+});
 
 async function testHook<T>(hookFn: () => T): Promise<T> {
 	let result: T | undefined;
@@ -446,6 +451,30 @@ describe('fetchImageExtension', () => {
 			expect(maxInFlight).toBe(4);
 			expect(totalCalls).toBe(6);
 			expect(results).toEqual(['png', 'png', 'png', 'png', 'png', 'png', 'png']);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
+	it('trips domain-level circuit breaker on CORS/network errors to fast-fail subsequent requests from same host', async () => {
+		let fetchCalls = 0;
+		globalThis.fetch = (async () => {
+			fetchCalls += 1;
+			throw new TypeError('Failed to fetch (CORS blocked by client)');
+		}) as any;
+
+		try {
+			// First call fails with CORS and trips circuit breaker for cdn.blocked-example.com
+			const ext1 = await fetchImageExtension('https://cdn.blocked-example.com/avatar/101');
+			expect(ext1).toBe('');
+			expect(fetchCalls).toBe(1);
+
+			// Second and third calls from same domain should fast-fail immediately without calling fetch
+			const ext2 = await fetchImageExtension('https://cdn.blocked-example.com/avatar/102');
+			const ext3 = await fetchImageExtension('https://cdn.blocked-example.com/attachment?aid=888');
+			expect(ext2).toBe('');
+			expect(ext3).toBe('');
+			expect(fetchCalls).toBe(1);
 		} finally {
 			globalThis.fetch = originalFetch;
 		}

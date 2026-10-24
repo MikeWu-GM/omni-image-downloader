@@ -1,5 +1,5 @@
 // @ts-check
-import { findImageBySrc, unique } from '../utils.js';
+import { findImageBySrc, measurePerf, recordPerfMetric, unique } from '../utils.js';
 import { normalizeExtension } from './data.js';
 import { getImageExtension } from './useImageStats.js';
 
@@ -14,24 +14,26 @@ const MAX_KEY_CACHE_SIZE = 2000;
  * @param {Record<string, { width: number; height: number }>} [imageDimensions]
  */
 export function deduplicateImages(urls, imagesCache, imageDimensions = {}) {
-	const keysByUrl = new Map(urls.map((url) => [url, getCachedNormalizedBaseKey(url)]));
-	const keys = new Set(keysByUrl.values());
+	return measurePerf(`dedup:deduplicateImages(${urls.length} images)`, () => {
+		const keysByUrl = new Map(urls.map((url) => [url, getCachedNormalizedBaseKey(url)]));
+		const keys = new Set(keysByUrl.values());
 
-	const groups = new Map();
-	for (const url of urls) {
-		const key = removeWidthSuffix(/** @type {string} */ (keysByUrl.get(url)), keys);
-		if (!groups.has(key)) groups.set(key, []);
-		groups.get(key).push(url);
-	}
-
-	const result = [];
-	for (const groupUrls of groups.values()) {
-		const bestImageUrl = pickBestImageUrl(groupUrls, imagesCache, imageDimensions);
-		if (bestImageUrl) {
-			result.push(bestImageUrl);
+		const groups = new Map();
+		for (const url of urls) {
+			const key = removeWidthSuffix(/** @type {string} */ (keysByUrl.get(url)), keys);
+			if (!groups.has(key)) groups.set(key, []);
+			groups.get(key).push(url);
 		}
-	}
-	return result;
+
+		const result = [];
+		for (const groupUrls of groups.values()) {
+			const bestImageUrl = pickBestImageUrl(groupUrls, imagesCache, imageDimensions);
+			if (bestImageUrl) {
+				result.push(bestImageUrl);
+			}
+		}
+		return result;
+	});
 }
 
 function getCachedNormalizedBaseKey(/** @type {string} */ url) {
@@ -161,7 +163,10 @@ function pickBestImageUrl(urlStrings, imagesCache, imageDimensions = {}) {
 		if (dim && dim.width > 0 && dim.height > 0) {
 			return dim;
 		}
+		const startFind = typeof performance !== 'undefined' ? performance.now() : Date.now();
 		const img = findImageBySrc(imagesCache, url.href);
+		const endFind = typeof performance !== 'undefined' ? performance.now() : Date.now();
+		recordPerfMetric('dedup:findImageBySrc_domQuery', endFind - startFind);
 		return img ? { width: img.naturalWidth, height: img.naturalHeight } : { width: 0, height: 0 };
 	};
 

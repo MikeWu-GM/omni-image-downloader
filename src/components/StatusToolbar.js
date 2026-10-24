@@ -9,11 +9,13 @@ import {
 	currentSelectedImages,
 	displayedImages,
 	downloadIsInProgress,
+	extractionScope,
 	filteredOutImages,
 	matchingImages,
 	selectedFilteredOutImages,
 	selectedImages,
 	selectedMatchingImages,
+	subfolderPerTab,
 	tab,
 	theme,
 } from './data.js';
@@ -106,6 +108,23 @@ export function StatusToolbar() {
 					loading=${downloadIsInProgress.value}
 					onClick=${maybeDownloadImages}
 				/>
+
+				${
+					extractionScope.value === 'current_window'
+						? html`
+								<${Checkbox}
+									class="text-2xs flex cursor-pointer items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+									checked=${subfolderPerTab.value}
+									title="Organize downloaded images into subfolders named after each tab"
+									onChange=${(/** @type {Event} */ e) => {
+										subfolderPerTab.value = /** @type {HTMLInputElement} */ (e.currentTarget).checked;
+									}}
+								>
+									<span class="text-nowrap">📁 Subfolders</span>
+								<//>
+							`
+						: null
+				}
 			</div>
 
 			<!-- Right: View Controls (Columns & Theme) -->

@@ -1,10 +1,13 @@
 // @ts-check
 import { action, batch, computed, effect, signal } from '../html.js';
 import {
+	disambiguateFolderNames,
 	findImageBySrc,
 	isIncludedIn,
 	isNotIncludedIn,
 	isNotStrictEqual,
+	measurePerf,
+	recordPerfMetric,
 	sanitizeFolderName,
 	unique,
 } from '../utils.js';
@@ -50,6 +53,10 @@ export const defaults = {
 	// Images
 	selected_images: /** @type {string[]} */ ([]),
 	columns: 2,
+	// Scope & Multi-Tab Grouping
+	extraction_scope: 'current_tab', // 'current_tab' | 'current_window'
+	group_by_tab: true,
+	subfolder_per_tab: true,
 };
 
 /** @template {keyof Options} K */
@@ -75,6 +82,35 @@ export const initialized = signal(false);
 export const openMode = storedSignal('open_mode');
 
 export const theme = storedSignal('theme');
+
+// Scope & Tab Groups
+export const extractionScope = storedSignal('extraction_scope');
+export const groupByTab = storedSignal('group_by_tab');
+export const subfolderPerTab = storedSignal('subfolder_per_tab');
+
+/**
+ * @typedef {{
+ *   id: number,
+ *   title: string,
+ *   url: string,
+ *   hostname: string,
+ *   favIconUrl?: string,
+ *   folderName: string,
+ *   allImages: string[],
+ *   linkedImages: string[],
+ *   imageDimensions: Record<string, { width: number; height: number }>,
+ *   status: 'idle' | 'loading' | 'loaded' | 'error',
+ *   error?: string,
+ *   collapsed?: boolean,
+ *   selected?: boolean
+ * }} TabGroup
+ */
+
+/** @type {import('@preact/signals').Signal<TabGroup[]>} */
+export const tabGroups = signal([]);
+
+/** @type {import('@preact/signals').Signal<Map<string, { tabId: number; title: string; folderName: string }>>} */
+export const imageToTabMap = signal(new Map());
 
 // Filters
 export const filterUrl = storedSignal('filter_url');
@@ -259,6 +295,7 @@ export const imageLoaded = action(
 	(/** @type {string | undefined} */ url, /** @type {number} */ width = 0, /** @type {number} */ height = 0) => {
 		if (!url) return;
 
+		recordPerfMetric('event:imageLoaded', 0);
 		batch(() => {
 			if (width > 0 && height > 0) {
 				const existing = imageDimensions.peek()[url];
@@ -336,132 +373,134 @@ function getFilterableUrl(/** @type {string} */ url) {
 }
 
 export const matchingImages = computed(() => {
-	let filtered = onlyImagesFromLinks.value ? linkedImages.value : allImages.value;
+	return measurePerf('computed:matchingImages', () => {
+		let filtered = onlyImagesFromLinks.value ? linkedImages.value : allImages.value;
 
-	let filterValue = filterUrl.value;
-	if (filterValue) {
-		switch (filterUrlMode.value) {
-			case 'normal':
-				const terms = filterValue.split(/\s+/);
-				filtered = filtered.filter((url) => {
-					const targetUrl = getFilterableUrl(url);
-					for (let index = 0; index < terms.length; index++) {
-						let term = terms[index];
-						if (term.length !== 0) {
-							const expected = term[0] !== '-';
-							if (!expected) {
-								term = term.substr(1);
-								if (term.length === 0) {
-									continue;
+		let filterValue = filterUrl.value;
+		if (filterValue) {
+			switch (filterUrlMode.value) {
+				case 'normal':
+					const terms = filterValue.split(/\s+/);
+					filtered = filtered.filter((url) => {
+						const targetUrl = getFilterableUrl(url);
+						for (let index = 0; index < terms.length; index++) {
+							let term = terms[index];
+							if (term.length !== 0) {
+								const expected = term[0] !== '-';
+								if (!expected) {
+									term = term.substr(1);
+									if (term.length === 0) {
+										continue;
+									}
+								}
+								const found = targetUrl.indexOf(term) !== -1;
+								if (found !== expected) {
+									return false;
 								}
 							}
-							const found = targetUrl.indexOf(term) !== -1;
-							if (found !== expected) {
-								return false;
-							}
 						}
+						return true;
+					});
+					break;
+				case 'wildcard':
+					filterValue = filterValue
+						.replace(/([.^$[\]\\(){}|+-])/g, '\\$1')
+						.replace(/\*+/g, '.*')
+						.replace(/\?/g, '.');
+				/* fall through */
+				case 'regex':
+					try {
+						const regex = new RegExp(filterValue);
+						filtered = filtered.filter((url) => regex.test(getFilterableUrl(url)));
+					} catch (error) {
+						filtered = [];
 					}
-					return true;
-				});
-				break;
-			case 'wildcard':
-				filterValue = filterValue
-					.replace(/([.^$[\]\\(){}|+-])/g, '\\$1')
-					.replace(/\*+/g, '.*')
-					.replace(/\?/g, '.');
-			/* fall through */
-			case 'regex':
-				try {
-					const regex = new RegExp(filterValue);
-					filtered = filtered.filter((url) => regex.test(getFilterableUrl(url)));
-				} catch (error) {
-					filtered = [];
-				}
-				break;
+					break;
+			}
 		}
-	}
 
-	// Subscribe to imagesLoadedVersion so matchingImages re-evaluates when images finish loading
-	imagesLoadedVersion.value;
-	const currentDimensions = imageDimensions.value;
-	/** @type {Record<string, { width: number; height: number }>} */
-	const effectiveDimensions = { ...currentDimensions };
-	/** @type {Map<string, HTMLImageElement> | null} */
-	let domImagesBySrc = null;
-	const getDomImage = (/** @type {string} */ src) => {
-		if (!imagesCache.value) return undefined;
-		if (!domImagesBySrc) {
-			domImagesBySrc = new Map();
-			for (const img of imagesCache.value.querySelectorAll('img')) {
-				const attr = img.getAttribute('src');
-				if (attr && !domImagesBySrc.has(attr)) {
-					domImagesBySrc.set(attr, img);
+		// Subscribe to imagesLoadedVersion so matchingImages re-evaluates when images finish loading
+		imagesLoadedVersion.value;
+		const currentDimensions = imageDimensions.value;
+		/** @type {Record<string, { width: number; height: number }>} */
+		const effectiveDimensions = { ...currentDimensions };
+		/** @type {Map<string, HTMLImageElement> | null} */
+		let domImagesBySrc = null;
+		const getDomImage = (/** @type {string} */ src) => {
+			if (!imagesCache.value) return undefined;
+			if (!domImagesBySrc) {
+				domImagesBySrc = new Map();
+				for (const img of imagesCache.value.querySelectorAll('img')) {
+					const attr = img.getAttribute('src');
+					if (attr && !domImagesBySrc.has(attr)) {
+						domImagesBySrc.set(attr, img);
+					}
 				}
 			}
-		}
-		return domImagesBySrc.get(src);
-	};
+			return domImagesBySrc.get(src);
+		};
 
-	const preset = filterSizePreset.value;
-	const activeFormats = selectedFormats.value;
-	const largeThreshold = customLargeThreshold.value;
-	const smallThreshold = customSmallThreshold.value;
+		const preset = filterSizePreset.value;
+		const activeFormats = selectedFormats.value;
+		const largeThreshold = customLargeThreshold.value;
+		const smallThreshold = customSmallThreshold.value;
 
-	filtered = filtered.filter((url) => {
-		if (!imagesCache.value) return false;
+		filtered = filtered.filter((url) => {
+			if (!imagesCache.value) return false;
 
-		const cachedDim = effectiveDimensions[url];
-		let width = cachedDim?.width;
-		let height = cachedDim?.height;
+			const cachedDim = effectiveDimensions[url];
+			let width = cachedDim?.width;
+			let height = cachedDim?.height;
 
-		if (width == null || height == null) {
-			const image = getDomImage(url);
-			width = image?.naturalWidth || 0;
-			height = image?.naturalHeight || 0;
-			if (width > 0 && height > 0) {
-				effectiveDimensions[url] = { width, height };
+			if (width == null || height == null) {
+				const image = getDomImage(url);
+				width = image?.naturalWidth || 0;
+				height = image?.naturalHeight || 0;
+				if (width > 0 && height > 0) {
+					effectiveDimensions[url] = { width, height };
+				}
 			}
-		}
 
-		// Size preset logic
-		let matchesSize = true;
-		if (preset !== 'all' && preset !== 'custom') {
-			const maxDim = Math.max(width, height);
-			if (preset === 'large') {
-				matchesSize = maxDim >= largeThreshold;
-			} else if (preset === 'medium') {
-				matchesSize = maxDim >= smallThreshold && maxDim < largeThreshold;
-			} else if (preset === 'small') {
-				matchesSize = maxDim > 0 && maxDim < smallThreshold;
+			// Size preset logic
+			let matchesSize = true;
+			if (preset !== 'all' && preset !== 'custom') {
+				const maxDim = Math.max(width, height);
+				if (preset === 'large') {
+					matchesSize = maxDim >= largeThreshold;
+				} else if (preset === 'medium') {
+					matchesSize = maxDim >= smallThreshold && maxDim < largeThreshold;
+				} else if (preset === 'small') {
+					matchesSize = maxDim > 0 && maxDim < smallThreshold;
+				}
 			}
+
+			// Format filter logic
+			let matchesFormat = true;
+			if (activeFormats.length > 0) {
+				const detected = detectedImageExtensions.value;
+				const rawExt = detected[url] || getImageExtension(url);
+				const ext = normalizeExtension(rawExt) || 'other';
+				matchesFormat = activeFormats.includes(ext);
+			}
+
+			return (
+				matchesSize &&
+				matchesFormat &&
+				// image && <-- we don't want this, it results in overly filtered images on initial load
+				(!filterMinWidthEnabled.value || filterMinWidth.value <= width) &&
+				(!filterMaxWidthEnabled.value || width <= filterMaxWidth.value) &&
+				(!filterMinHeightEnabled.value || filterMinHeight.value <= height) &&
+				(!filterMaxHeightEnabled.value || height <= filterMaxHeight.value) &&
+				(!hideErroredImages.value || !erroredImages.value.includes(url))
+			);
+		});
+
+		if (onlyUniqueImages.value && imagesCache.value) {
+			filtered = deduplicateImages(filtered, imagesCache.value, effectiveDimensions);
 		}
 
-		// Format filter logic
-		let matchesFormat = true;
-		if (activeFormats.length > 0) {
-			const detected = detectedImageExtensions.value;
-			const rawExt = detected[url] || getImageExtension(url);
-			const ext = normalizeExtension(rawExt) || 'other';
-			matchesFormat = activeFormats.includes(ext);
-		}
-
-		return (
-			matchesSize &&
-			matchesFormat &&
-			// image && <-- we don't want this, it results in overly filtered images on initial load
-			(!filterMinWidthEnabled.value || filterMinWidth.value <= width) &&
-			(!filterMaxWidthEnabled.value || width <= filterMaxWidth.value) &&
-			(!filterMinHeightEnabled.value || filterMinHeight.value <= height) &&
-			(!filterMaxHeightEnabled.value || height <= filterMaxHeight.value) &&
-			(!hideErroredImages.value || !erroredImages.value.includes(url))
-		);
+		return filtered;
 	});
-
-	if (onlyUniqueImages.value && imagesCache.value) {
-		filtered = deduplicateImages(filtered, imagesCache.value, effectiveDimensions);
-	}
-
-	return filtered;
 });
 
 export const filteredOutImages = computed(() => allImages.value.filter(isNotIncludedIn(matchingImages.value)));
@@ -545,17 +584,17 @@ function executeOnTab(
 					selectedFormats.value = selectedFormats.value.filter((fmt) => currentFormats.has(fmt));
 				}
 
-				for (const message of messages) {
-					if (message.result?.origin) {
-						try {
-							hostname.value = new URL(message?.result?.origin).hostname;
-						} catch (error) {
-							// ignore
-						}
+				const topMessage = messages.find((m) => m.frameId === 0);
+				if (topMessage?.result?.origin) {
+					try {
+						hostname.value = new URL(topMessage.result.origin).hostname;
+					} catch (error) {
+						// ignore
 					}
-					if (message.result?.title) {
-						pageTitle.value = message.result.title;
-					}
+				}
+				const resolvedTitle = topMessage?.result?.title || activeTab.title || '';
+				if (resolvedTitle) {
+					pageTitle.value = resolvedTitle;
 				}
 
 				if (!isFolderCustomized.value) {
@@ -665,6 +704,232 @@ async function withBlobUrlsRead(/** @type {number} */ tabId, /** @type {Message}
 		result: { ...result, allImages: result.allImages.map(read), linkedImages: result.linkedImages.map(read) },
 	};
 }
+
+async function extractImagesFromTab(/** @type {any} */ tab, /** @type {number | false} */ waitForIdleDOM) {
+	if (tab.id == null) return null;
+	const tabId = tab.id;
+	try {
+		console.info(`[ID-Window] 🔍 Extracting from Tab ${tabId} ("${tab.title || tab.url || 'Pending Tab'}") ...`);
+		const messages = await chrome.scripting.executeScript({
+			target: { tabId, allFrames: true },
+			func: findImages,
+			args: [{ waitForIdleDOM }],
+		});
+		const processed = await Promise.all(messages.map((m) => withBlobUrlsRead(tabId, m)));
+		const tabAllImages = unique(processed.flatMap((m) => m.result?.allImages || []));
+		const tabLinkedImages = unique(processed.flatMap((m) => m.result?.linkedImages || []));
+		const dimensions = /** @type {Record<string, { width: number; height: number }>} */ ({});
+		for (const m of processed) {
+			if (m.result?.imageDimensions) {
+				Object.assign(dimensions, m.result.imageDimensions);
+			}
+		}
+		const topMessage = processed.find((m) => m.frameId === 0);
+		const tabTitle = topMessage?.result?.title || tab.title || '';
+		const tabOrigin = topMessage?.result?.origin || '';
+		console.info(`[ID-Window] ✅ Tab ${tabId} success: ${tabAllImages.length} images found (title: "${tabTitle}")`);
+		return {
+			allImages: tabAllImages,
+			linkedImages: tabLinkedImages,
+			imageDimensions: dimensions,
+			title: tabTitle,
+			origin: tabOrigin,
+		};
+	} catch (error) {
+		const errMsg = /** @type {any} */ (error)?.message || String(error);
+		console.warn(`[ID-Window] ⚠️ Tab ${tabId} extraction failed:`, errMsg);
+		throw error;
+	}
+}
+
+export const loadImagesFromCurrentWindow = action(
+	(/** @type {{ waitForIdleDOM: number | false }} */ { waitForIdleDOM } = { waitForIdleDOM: false }) => {
+		return new Promise((resolve) => {
+			chrome.windows.getCurrent(async (currentWindow) => {
+				if (chrome.runtime?.lastError || !currentWindow) {
+					console.warn('[ID-Window] ⚠️ Failed to get current window:', chrome.runtime?.lastError?.message);
+					resolve(undefined);
+					return;
+				}
+				chrome.tabs.query({ windowId: currentWindow.id }, async (tabs) => {
+					if (chrome.runtime?.lastError || !tabs || tabs.length === 0) {
+						console.warn('[ID-Window] ⚠️ Failed to query tabs for window:', chrome.runtime?.lastError?.message);
+						resolve(undefined);
+						return;
+					}
+
+					console.info(
+						`[ID-Window] 🗂️ Query returned ${tabs.length} tabs for window ${currentWindow.id}:`,
+						tabs.map((t) => ({ id: t.id, title: t.title, url: t.url, active: t.active }))
+					);
+
+					const validTabs = tabs.filter((t) => t.id != null && (!t.url || !browserPageUrl.test(t.url)));
+					console.info(`[ID-Window] 🎯 Usable web tabs after system filtering: ${validTabs.length}`);
+
+					if (validTabs.length === 0) {
+						tabGroups.value = [];
+						resolve(undefined);
+						return;
+					}
+
+					const existingGroupsMap = new Map(tabGroups.value.map((/** @type {TabGroup} */ g) => [g.id, g]));
+					/** @type {TabGroup[]} */
+					const groups = validTabs.map((t) => {
+						const tabId = /** @type {number} */ (t.id);
+						const existing = existingGroupsMap.get(tabId);
+						let h = t.url || '';
+						try {
+							h = new URL(t.url || '').hostname;
+						} catch {}
+						return {
+							id: tabId,
+							title: t.title || h || `Tab ${tabId}`,
+							url: t.url || '',
+							hostname: h,
+							favIconUrl: t.favIconUrl || '',
+							folderName: sanitizeFolderName(t.title || h, h),
+							allImages: existing?.allImages || [],
+							linkedImages: existing?.linkedImages || [],
+							imageDimensions: existing?.imageDimensions || {},
+							status:
+								existing?.status === 'loaded'
+									? 'loaded'
+									: /** @type {'idle' | 'loading' | 'loaded' | 'error'} */ ('loading'),
+							error: existing?.error || '',
+							collapsed: existing?.collapsed ?? false,
+							selected: existing?.selected ?? true,
+						};
+					});
+
+					tabGroups.value = groups;
+
+					const tabResults = await Promise.allSettled(
+						validTabs.map(async (tab, index) => {
+							try {
+								const res = await extractImagesFromTab(tab, waitForIdleDOM);
+								return { index, tab, res };
+							} catch (err) {
+								const errMsg = /** @type {any} */ (err)?.message || String(err);
+								return { index, tab, error: errMsg };
+							}
+						})
+					);
+
+					batch(() => {
+						const newMap = new Map();
+						const aggregatedAll = [];
+						const aggregatedLinked = [];
+						const aggregatedDimensions = /** @type {Record<string, { width: number; height: number }>} */ ({});
+
+						const rawFolderNames = groups.map((group, idx) => {
+							const resultItem = tabResults[idx];
+							if (resultItem.status === 'fulfilled' && resultItem.value.res) {
+								const safeTitle = resultItem.value.res.title || group.title;
+								return sanitizeFolderName(safeTitle, group.hostname);
+							}
+							return group.folderName;
+						});
+						const uniqueFolderNames = disambiguateFolderNames(rawFolderNames);
+
+						/** @type {TabGroup[]} */
+						const updatedGroups = groups.map((group, idx) => {
+							const resultItem = tabResults[idx];
+							const folder = uniqueFolderNames[idx];
+							if (resultItem.status === 'fulfilled') {
+								const { res, error } = resultItem.value;
+								if (res) {
+									const safeTitle = res.title || group.title;
+									return {
+										...group,
+										title: safeTitle,
+										folderName: folder,
+										allImages: res.allImages,
+										linkedImages: res.linkedImages,
+										imageDimensions: res.imageDimensions,
+										status: /** @type {'idle' | 'loading' | 'loaded' | 'error'} */ ('loaded'),
+									};
+								} else if (error) {
+									return {
+										...group,
+										folderName: folder,
+										status: /** @type {'idle' | 'loading' | 'loaded' | 'error'} */ ('error'),
+										error,
+									};
+								}
+							}
+							return { ...group, folderName: folder };
+						});
+
+						tabGroups.value = updatedGroups;
+
+						for (const g of updatedGroups) {
+							aggregatedAll.push(...g.allImages);
+							aggregatedLinked.push(...g.linkedImages);
+							Object.assign(aggregatedDimensions, g.imageDimensions);
+
+							for (const imgUrl of g.allImages) {
+								newMap.set(imgUrl, {
+									tabId: g.id,
+									title: g.title,
+									folderName: g.folderName,
+								});
+							}
+						}
+
+						imageToTabMap.value = newMap;
+						allImages.value = unique(aggregatedAll);
+						linkedImages.value = unique(aggregatedLinked);
+						imageDimensions.value = aggregatedDimensions;
+						erroredImages.value = allImages.value.filter(isIncludedIn(erroredImages.value));
+						selectedImages.value = allImages.value.filter(isIncludedIn(selectedImages.value));
+
+						console.info(
+							`[ID-Window] 📊 Aggregated total: ${allImages.value.length} unique images across ${updatedGroups.length} tabs`
+						);
+
+						if (!isFolderCustomized.value) {
+							// In window mode with subfolders, leave parent folderName empty so images download
+							// directly into each tab's subfolder (e.g. <Downloads>/<Tab_Title>/<file>) without a redundant outer wrapper.
+							folderName.value = '';
+						}
+					});
+
+					if (!waitForIdleDOM) {
+						loadImagesFromCurrentWindow({ waitForIdleDOM: 1000 });
+					}
+					resolve(undefined);
+				});
+			});
+		});
+	}
+);
+
+export const toggleTabGroupSelection = action((/** @type {number} */ tabId, /** @type {boolean} */ selected) => {
+	batch(() => {
+		const target = tabGroups.value.find((/** @type {TabGroup} */ g) => g.id === tabId);
+		if (!target) return;
+		target.selected = selected;
+		tabGroups.value = [...tabGroups.value];
+
+		const tabImageSet = new Set(target.allImages);
+		if (selected) {
+			const toAdd = target.allImages.filter((/** @type {string} */ img) => !selectedImages.value.includes(img));
+			selectedImages.value = [...selectedImages.value, ...toAdd];
+		} else {
+			selectedImages.value = selectedImages.value.filter((img) => !tabImageSet.has(img));
+		}
+	});
+});
+
+export const toggleTabGroupCollapse = action((/** @type {number} */ tabId) => {
+	tabGroups.value = tabGroups.value.map((/** @type {TabGroup} */ g) =>
+		g.id === tabId ? { ...g, collapsed: !g.collapsed } : g
+	);
+});
+
+export const setAllTabGroupsCollapsed = action((/** @type {boolean} */ collapsed) => {
+	tabGroups.value = tabGroups.value.map((/** @type {TabGroup} */ g) => ({ ...g, collapsed }));
+});
 
 export const reloadImagesWhenPageLoads = action(
 	(/** @type {number | undefined}*/ tabId, /** @type {any} */ changeInfo, /** @type {any} */ tab) => {

@@ -81,6 +81,44 @@ describe('serviceWorker filename suggestions', () => {
 		expect(chrome.downloads.onDeterminingFilename.listeners.size).toBe(0);
 	});
 
+	it('suggests tab-specific subfolders when subfolders are provided in options', async () => {
+		const done = startBatch(['https://example.com/1.jpg', 'https://example.com/2.jpg'], {
+			folder_name: 'batch_root',
+			subfolders: ['Tab_Alpha', 'Tab_Beta'],
+		});
+		const [firstId, secondId] = downloadIds.slice(-2);
+
+		const suggestFirst = mock();
+		filenameListener()({ id: firstId, filename: '1.jpg' }, suggestFirst);
+		expect(suggestFirst.mock.calls).toEqual([[{ filename: 'batch_root/Tab_Alpha/1.jpg', conflictAction: 'uniquify' }]]);
+
+		const suggestSecond = mock();
+		filenameListener()({ id: secondId, filename: '2.jpg' }, suggestSecond);
+		expect(suggestSecond.mock.calls).toEqual([[{ filename: 'batch_root/Tab_Beta/2.jpg', conflictAction: 'uniquify' }]]);
+
+		await done;
+		expect(chrome.downloads.onDeterminingFilename.listeners.size).toBe(0);
+	});
+
+	it('suggests direct tab subfolders without outer folder when folder_name is empty', async () => {
+		const done = startBatch(['https://example.com/1.jpg', 'https://example.com/2.jpg'], {
+			folder_name: '',
+			subfolders: ['Tab_Alpha', 'Tab_Beta'],
+		});
+		const [firstId, secondId] = downloadIds.slice(-2);
+
+		const suggestFirst = mock();
+		filenameListener()({ id: firstId, filename: '1.jpg' }, suggestFirst);
+		expect(suggestFirst.mock.calls).toEqual([[{ filename: 'Tab_Alpha/1.jpg', conflictAction: 'uniquify' }]]);
+
+		const suggestSecond = mock();
+		filenameListener()({ id: secondId, filename: '2.jpg' }, suggestSecond);
+		expect(suggestSecond.mock.calls).toEqual([[{ filename: 'Tab_Beta/2.jpg', conflictAction: 'uniquify' }]]);
+
+		await done;
+		expect(chrome.downloads.onDeterminingFilename.listeners.size).toBe(0);
+	});
+
 	it('keeps listening until every download in the batch has been named', async () => {
 		deferDownloadCallbacks = true;
 		const done = startBatch(['https://example.com/1.jpg', 'https://example.com/2.jpg']);
@@ -145,6 +183,32 @@ describe('Firefox', () => {
 			expect(chrome.downloads.download.mock.calls.at(-1)[0]).toEqual({
 				url: 'https://example.com/path/a.png?size=large',
 				filename: 'folder/name1.png',
+				conflictAction: 'uniquify',
+			});
+		});
+
+		it('passes subfolders to downloads.download() in Firefox mode', async () => {
+			await startBatch(['https://example.com/photo.png'], {
+				folder_name: 'firefox_root',
+				subfolders: ['SubTab'],
+			});
+
+			expect(chrome.downloads.download.mock.calls.at(-1)[0]).toEqual({
+				url: 'https://example.com/photo.png',
+				filename: 'firefox_root/SubTab/photo.png',
+				conflictAction: 'uniquify',
+			});
+		});
+
+		it('passes direct subfolder without outer folder when folder_name is empty in Firefox mode', async () => {
+			await startBatch(['https://example.com/photo.png'], {
+				folder_name: '',
+				subfolders: ['SubTab'],
+			});
+
+			expect(chrome.downloads.download.mock.calls.at(-1)[0]).toEqual({
+				url: 'https://example.com/photo.png',
+				filename: 'SubTab/photo.png',
 				conflictAction: 'uniquify',
 			});
 		});

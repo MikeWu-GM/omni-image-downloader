@@ -53,6 +53,34 @@ describe('downloadImages', () => {
 		expect(sentMessage.options.source_url_file.filename).toBe('my_gallery/source.html');
 		expect(sentMessage.options.source_url_file.url).toStartWith('data:text/html;charset=utf-8,');
 	});
+
+	it('passes tab-specific subfolders when extractionScope is current_window and subfolderPerTab is true', async () => {
+		const { downloadImages } = await import('./actions.js');
+		const { extractionScope, subfolderPerTab, imageToTabMap, folderName } = await import('./data.js');
+
+		extractionScope.value = 'current_window';
+		subfolderPerTab.value = true;
+		folderName.value = 'Window_Batch';
+		imageToTabMap.value = new Map([
+			['https://example.com/tab1_img.jpg', { tabId: 101, title: 'Tab 1', folderName: 'Tab_1_Album' }],
+			['https://example.com/tab2_img.jpg', { tabId: 102, title: 'Tab 2', folderName: 'Tab_2_Album' }],
+		]);
+
+		let sentMessage: any;
+		chrome.runtime.sendMessage = ((message: any, cb: any) => {
+			sentMessage = message;
+			cb?.();
+		}) as any;
+
+		await downloadImages(['https://example.com/tab1_img.jpg', 'https://example.com/tab2_img.jpg']);
+
+		expect(sentMessage.type).toBe('downloadImages');
+		expect(sentMessage.options.folder_name).toBe('Window_Batch');
+		expect(sentMessage.options.subfolders).toEqual(['Tab_1_Album', 'Tab_2_Album']);
+
+		// Restore default scope to prevent polluting subsequent test suites
+		extractionScope.value = 'current_tab';
+	});
 });
 
 describe('maybeDownloadImages & triggerDownload', () => {

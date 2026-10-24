@@ -288,7 +288,8 @@ function suggestNewFilename(item, suggest) {
 
 /** @returns {chrome.downloads.DownloadOptions} */
 function withFilename(/** @type {Task} */ task, /** @type {number} */ index, /** @type {string} */ url) {
-	if (!task.options.folder_name && !task.options.new_file_name) return { url };
+	const hasSubfolder = Boolean(task.options?.subfolders?.[index]);
+	if (!task.options.folder_name && !task.options.new_file_name && !hasSubfolder) return { url };
 
 	// A `data:` URL's path is its payload, not a filename.
 	const isDataUrl = url.startsWith('data:');
@@ -310,6 +311,11 @@ function buildFilename(
 	let newFilename = '';
 	if (task.options.folder_name) {
 		newFilename += `${task.options.folder_name}/`;
+	}
+
+	const subfolder = task.options?.subfolders?.[index];
+	if (subfolder) {
+		newFilename += `${subfolder}/`;
 	}
 
 	const regex = /(?:\.([^.]+))?$/;

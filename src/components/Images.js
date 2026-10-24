@@ -1,15 +1,21 @@
 // @ts-check
 import html, { For, Show, useComputed, useSignal } from '../html.js';
 
-import { isNotStrictEqual, stopPropagation } from '../utils.js';
+import { isIncludedIn, isNotStrictEqual, stopPropagation } from '../utils.js';
 import * as actions from './actions.js';
+import { Checkbox } from './Checkbox.js';
 import {
 	columns,
 	displayedImages,
+	extractionScope,
+	groupByTab,
 	imageErrored,
 	imageLoaded,
 	normalizeExtension,
 	selectedImages,
+	tabGroups,
+	toggleTabGroupCollapse,
+	toggleTabGroupSelection,
 	updateDetectedExtension,
 } from './data.js';
 import { useImageStats } from './useImageStats.js';
@@ -39,6 +45,20 @@ import { useScrollToEnd } from './useScrollToEnd.js';
  */
 
 export function Images(/** @type {ImagesProps} */ { class: className = '', style, ...props }) {
+	const isWindowGrouping = extractionScope.value === 'current_window' && groupByTab.value;
+
+	if (isWindowGrouping && tabGroups.value.length > 0) {
+		return html`
+			<div class="${className} flex flex-col gap-3 p-2" style=${style} ...${props}>
+				<${For} each=${tabGroups}>
+					${(/** @type {import('./data.js').TabGroup} */ group) => html`
+						<${TabGroupCard} key=${group.id} group=${group} />
+					`}
+				<//>
+			</div>
+		`;
+	}
+
 	return html`
 		<div
 			class="${className} grid gap-2 p-2"
@@ -62,6 +82,114 @@ export function Images(/** @type {ImagesProps} */ { class: className = '', style
 	`;
 }
 
+function TabGroupCard(/** @type {{ group: import('./data.js').TabGroup }} */ { group }) {
+	const tabDisplayedImages = group.allImages.filter(isIncludedIn(displayedImages.value));
+	const isAllSelected = tabDisplayedImages.length > 0 && tabDisplayedImages.every(isIncludedIn(selectedImages.value));
+	const isPartiallySelected = tabDisplayedImages.some(isIncludedIn(selectedImages.value)) && !isAllSelected;
+
+	return html`
+		<div
+			class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900/60"
+		>
+			<!-- Tab Group Header -->
+			<div
+				class="tab-group-header flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/80 px-3 py-2 text-xs select-none dark:border-slate-800 dark:bg-slate-800/80"
+			>
+				<div
+					class="flex flex-1 cursor-pointer items-center gap-2 overflow-hidden"
+					onClick=${() => toggleTabGroupCollapse(group.id)}
+					title="Click to expand/collapse this tab group"
+				>
+					<span
+						class="text-3xs ${group.collapsed ? '-rotate-90' : 'rotate-0'} inline-block text-slate-400 transition-transform"
+					>
+						▼
+					</span>
+					${
+						group.favIconUrl
+							? html`<img
+									src=${group.favIconUrl}
+									class="size-4 shrink-0 rounded-xs object-contain"
+									onError=${(/** @type {any} */ e) => {
+										if (e.currentTarget) e.currentTarget.style.display = 'none';
+									}}
+								/>`
+							: html`<span class="text-xs">📄</span>`
+					}
+					<div class="flex flex-col overflow-hidden">
+						<div class="flex items-center gap-1.5 overflow-hidden">
+							<span class="truncate font-semibold text-slate-800 dark:text-slate-100" title=${group.title}>
+								${group.title || group.hostname || `Tab ${group.id}`}
+							</span>
+							<span
+								class="text-3xs rounded bg-sky-100/80 px-1 py-0.5 font-medium text-sky-800 dark:bg-sky-900/60 dark:text-sky-300"
+								title="Target subfolder for this tab"
+							>
+								📁 ${group.folderName}
+							</span>
+						</div>
+						<span class="text-3xs truncate text-slate-400 dark:text-slate-500" title=${group.url}>
+							${group.hostname || group.url}
+						</span>
+					</div>
+				</div>
+
+				<div class="flex shrink-0 items-center gap-2">
+					<span
+						class="text-3xs rounded-full bg-slate-200/80 px-2 py-0.5 font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+					>
+						${tabDisplayedImages.length} images
+					</span>
+
+					<${Checkbox}
+						class="flex items-center"
+						checked=${isAllSelected}
+						indeterminate=${isPartiallySelected}
+						disabled=${tabDisplayedImages.length === 0}
+						title="Select or unselect all images from this tab"
+						onChange=${(/** @type {Event} */ e) => {
+							const { checked } = /** @type {HTMLInputElement} */ (e.currentTarget);
+							toggleTabGroupSelection(group.id, checked);
+						}}
+					/>
+				</div>
+			</div>
+
+			<!-- Tab Images Body -->
+			${
+				!group.collapsed
+					? tabDisplayedImages.length === 0
+						? html`
+								<div class="p-4 text-center text-xs text-slate-400 italic dark:text-slate-500">
+									No images matching current filters in this tab
+								</div>
+							`
+						: html`
+								<div
+									class="grid gap-2 p-2"
+									style=${{ gridTemplateColumns: `repeat(${columns.value}, minmax(0, 1fr))` }}
+								>
+									${tabDisplayedImages.map(
+										(imageUrl) => html`
+											<${ImageCard}
+												key=${imageUrl}
+												imageUrl=${imageUrl}
+												onClick=${() => {
+													selectedImages.value = selectedImages.value.includes(imageUrl)
+														? selectedImages.value.filter(isNotStrictEqual(imageUrl))
+														: [...selectedImages.value, imageUrl];
+												}}
+											/>
+										`
+									)}
+								</div>
+							`
+					: null
+			}
+		</div>
+	`;
+}
+
 function ImageCard(/** @type {{ imageUrl: string }} */ { imageUrl, ...props }) {
 	const stats = useImageStats(imageUrl, updateDetectedExtension);
 	const statsAreLoaded = useComputed(() => stats.data.value.status === 'loaded');
@@ -70,7 +198,7 @@ function ImageCard(/** @type {{ imageUrl: string }} */ { imageUrl, ...props }) {
 
 	return html`
 		<div
-			class="group relative cursor-pointer flex justify-center items-center overflow-hidden rounded-xl shadow-md border bg-[conic-gradient(var(--color-slate-100)_90deg,var(--color-slate-300)_90deg_180deg,var(--color-slate-100)_180deg_270deg,var(--color-slate-300)_270deg)] dark:bg-[conic-gradient(var(--color-slate-800)_90deg,var(--color-slate-700)_90deg_180deg,var(--color-slate-800)_180deg_270deg,var(--color-slate-700)_270deg)] ${isSelected ? 'border-sky-600 dark:border-sky-400 outline-2 outline-sky-600 dark:outline-sky-400' : 'border-slate-300 dark:border-slate-700'}"
+			class="group relative cursor-pointer flex justify-center items-center overflow-hidden rounded-xl shadow-md border contain-paint bg-[conic-gradient(var(--color-slate-100)_90deg,var(--color-slate-300)_90deg_180deg,var(--color-slate-100)_180deg_270deg,var(--color-slate-300)_270deg)] dark:bg-[conic-gradient(var(--color-slate-800)_90deg,var(--color-slate-700)_90deg_180deg,var(--color-slate-800)_180deg_270deg,var(--color-slate-700)_270deg)] ${isSelected ? 'border-sky-600 dark:border-sky-400 outline-2 outline-sky-600 dark:outline-sky-400' : 'border-slate-300 dark:border-slate-700'}"
 			style=${{
 				minHeight: `192px`,
 				backgroundRepeat: 'repeat',
@@ -88,7 +216,6 @@ function ImageCard(/** @type {{ imageUrl: string }} */ { imageUrl, ...props }) {
 						/>`
 					: html`<img
 							key=${retryCount}
-							class="drop-shadow-md"
 							loading="lazy"
 							decoding="async"
 							src=${imageUrl}

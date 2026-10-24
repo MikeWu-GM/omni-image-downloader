@@ -28,8 +28,10 @@ import {
 	imageLoaded,
 	imagesCache,
 	initialize,
+	isFolderCustomized,
 	linkedImages,
 	loadImagesFromActiveTab,
+	loadImagesFromCurrentWindow,
 	matchingImages,
 	newFileName,
 	normalizeExtension,
@@ -38,10 +40,18 @@ import {
 	scriptError,
 	selectedFormats,
 	selectedImages,
+	setAllTabGroupsCollapsed,
 	setLockedTabId,
 	showAdvancedFilters,
 	showDownloadConfirmation,
+	subfolderPerTab,
 	tab,
+	tabGroups,
+	toggleTabGroupCollapse,
+	toggleTabGroupSelection,
+	extractionScope,
+	groupByTab,
+	imageToTabMap,
 	detectedImageExtensions,
 	updateDetectedExtension,
 } from './data.js';
@@ -94,6 +104,10 @@ beforeEach(() => {
 	columns.value = 2;
 	folderName.value = '';
 	newFileName.value = '';
+	extractionScope.value = 'current_tab';
+	groupByTab.value = true;
+	subfolderPerTab.value = true;
+	tabGroups.value = [];
 	setupMocks();
 });
 
@@ -381,6 +395,40 @@ describe('loadImagesFromActiveTab', () => {
 
 		expect(folderName.value).toBe('My Gallery_Summer 2026');
 	});
+
+	it('prefers top-level frame (frameId: 0) title over child iframe titles', async () => {
+		const chrome = (global as any).chrome;
+		chrome.windows = { getCurrent: (cb: any) => cb({ id: 1 }) };
+		chrome.tabs.query = mock((_query: any, callback: any) =>
+			callback([{ id: 10, url: 'https://forum.example.com/thread-12345', title: 'Real Topic Title' }])
+		);
+		chrome.scripting = {
+			executeScript: mock(async () => [
+				{
+					frameId: 0,
+					result: {
+						allImages: ['https://example.com/pic1.jpg'],
+						linkedImages: [],
+						title: 'Real Topic Title',
+					},
+				},
+				{
+					frameId: 1,
+					result: {
+						allImages: ['https://example.com/logo.jpg'],
+						linkedImages: [],
+						title: 'Auth Login',
+					},
+				},
+			]),
+		};
+
+		folderName.value = '';
+		loadImagesFromActiveTab({ waitForIdleDOM: 1 });
+		await new Promise((resolve) => setTimeout(resolve, 10));
+
+		expect(folderName.value).toBe('Real Topic Title');
+	});
 });
 
 describe('reloadImagesWhenPageLoads', () => {
@@ -636,5 +684,207 @@ describe('currentSelectedImages', () => {
 		expect(filterMinWidthEnabled.value).toBe(false);
 		expect(filterMaxWidthEnabled.value).toBe(false);
 		expect(matchingImages.value).toHaveLength(3);
+	});
+
+	describe('Window scope multi-tab extraction & grouping', () => {
+		beforeEach(() => {
+			setupMocks();
+		});
+
+		it('initializes with default extraction_scope, group_by_tab and subfolder_per_tab', async () => {
+			await initialize();
+			expect(extractionScope.value).toBe('current_tab');
+			expect(groupByTab.value).toBe(true);
+			expect(subfolderPerTab.value).toBe(true);
+		});
+
+		it('extracts images from multiple tabs in current window, skipping restricted tabs', async () => {
+			await initialize();
+
+			(chrome.windows.getCurrent as any) = mock((cb: any) => cb({ id: 100 }));
+
+			const mockTabs = [
+				{
+					id: 1,
+					windowId: 100,
+					url: 'https://site-a.com/gallery',
+					title: 'Site A Gallery',
+					favIconUrl: 'https://site-a.com/fav.png',
+				},
+				{ id: 2, windowId: 100, url: 'chrome://extensions', title: 'Extensions' },
+				{
+					id: 3,
+					windowId: 100,
+					url: 'https://site-b.com/photos',
+					title: 'Site B Photos',
+					favIconUrl: 'https://site-b.com/fav.ico',
+				},
+			];
+			(chrome.tabs.query as any) = mock((_query: any, cb: any) => cb(mockTabs));
+
+			(chrome as any).scripting = {
+				executeScript: mock(async ({ target }: any) => {
+					if (target.tabId === 1) {
+						return [
+							{
+								result: {
+									allImages: ['https://site-a.com/img1.jpg', 'https://site-a.com/img2.jpg'],
+									linkedImages: [],
+									imageDimensions: { 'https://site-a.com/img1.jpg': { width: 1000, height: 800 } },
+									title: 'Site A Gallery',
+								},
+							},
+						];
+					}
+					if (target.tabId === 3) {
+						return [
+							{
+								result: {
+									allImages: ['https://site-b.com/pic1.png'],
+									linkedImages: [],
+									imageDimensions: { 'https://site-b.com/pic1.png': { width: 1200, height: 900 } },
+									title: 'Site B Photos',
+								},
+							},
+						];
+					}
+					return [];
+				}),
+			};
+
+			extractionScope.value = 'current_window';
+			await loadImagesFromCurrentWindow({ waitForIdleDOM: 1000 });
+
+			expect(tabGroups.value.length).toBe(2);
+			expect(tabGroups.value[0].id).toBe(1);
+			expect(tabGroups.value[0].title).toBe('Site A Gallery');
+			expect(tabGroups.value[0].allImages).toEqual(['https://site-a.com/img1.jpg', 'https://site-a.com/img2.jpg']);
+			expect(tabGroups.value[1].id).toBe(3);
+			expect(tabGroups.value[1].allImages).toEqual(['https://site-b.com/pic1.png']);
+
+			expect(allImages.value).toEqual([
+				'https://site-a.com/img1.jpg',
+				'https://site-a.com/img2.jpg',
+				'https://site-b.com/pic1.png',
+			]);
+
+			expect(imageToTabMap.value.get('https://site-a.com/img1.jpg')?.tabId).toBe(1);
+			expect(imageToTabMap.value.get('https://site-b.com/pic1.png')?.tabId).toBe(3);
+		});
+
+		it('disambiguates identical tab titles to ensure unique subfolder names', async () => {
+			await initialize();
+
+			(chrome.windows.getCurrent as any) = mock((cb: any) => cb({ id: 100 }));
+			const mockTabs = [
+				{ id: 10, windowId: 100, url: 'https://forum.example.com/post/1', title: 'Auth Login' },
+				{ id: 20, windowId: 100, url: 'https://forum.example.com/post/2', title: 'Auth Login' },
+				{ id: 30, windowId: 100, url: 'https://forum.example.com/post/3', title: 'Auth Login' },
+			];
+			(chrome.tabs.query as any) = mock((_query: any, cb: any) => cb(mockTabs));
+
+			(chrome as any).scripting = {
+				executeScript: mock(async ({ target }: any) => {
+					return [
+						{
+							result: {
+								allImages: [`https://forum.example.com/img_${target.tabId}.jpg`],
+								linkedImages: [],
+								imageDimensions: {},
+								title: 'Auth Login',
+							},
+						},
+					];
+				}),
+			};
+
+			extractionScope.value = 'current_window';
+			await loadImagesFromCurrentWindow({ waitForIdleDOM: 1000 });
+
+			expect(tabGroups.value.length).toBe(3);
+			expect(tabGroups.value[0].folderName).toBe('Auth Login');
+			expect(tabGroups.value[1].folderName).toBe('Auth Login (2)');
+			expect(tabGroups.value[2].folderName).toBe('Auth Login (3)');
+			expect(folderName.value).toBe('');
+		});
+
+		it('leaves folderName empty by default in window mode and preserves customized folderName', async () => {
+			const chrome = (global as any).chrome;
+			chrome.windows = { getCurrent: (cb: any) => cb({ id: 1 }) };
+			chrome.tabs = {
+				query: (_query: any, cb: any) => cb([{ id: 101, title: 'Tab One', url: 'https://site-one.com' }]),
+			};
+			chrome.scripting = {
+				executeScript: mock(async () => [
+					{ result: { allImages: ['https://site-one.com/img.jpg'], linkedImages: [], imageDimensions: {}, title: 'Tab One' } },
+				]),
+			};
+
+			extractionScope.value = 'current_window';
+			isFolderCustomized.value = true;
+			folderName.value = 'MyCustomBatch';
+
+			await loadImagesFromCurrentWindow({ waitForIdleDOM: 1000 });
+			expect(folderName.value).toBe('MyCustomBatch');
+		});
+
+		it('toggles selection and collapse state for a tab group', async () => {
+			tabGroups.value = [
+				{
+					id: 1,
+					title: 'Tab 1',
+					url: 'https://site-a.com',
+					hostname: 'site-a.com',
+					favIconUrl: '',
+					error: '',
+					folderName: 'Tab_1',
+					allImages: ['https://site-a.com/1.jpg', 'https://site-a.com/2.jpg'],
+					linkedImages: [],
+					imageDimensions: {},
+					status: 'loaded',
+					collapsed: false,
+					selected: true,
+				},
+				{
+					id: 2,
+					title: 'Tab 2',
+					url: 'https://site-b.com',
+					hostname: 'site-b.com',
+					favIconUrl: '',
+					error: '',
+					folderName: 'Tab_2',
+					allImages: ['https://site-b.com/3.jpg'],
+					linkedImages: [],
+					imageDimensions: {},
+					status: 'loaded',
+					collapsed: false,
+					selected: true,
+				},
+			];
+			allImages.value = ['https://site-a.com/1.jpg', 'https://site-a.com/2.jpg', 'https://site-b.com/3.jpg'];
+			selectedImages.value = [...allImages.value];
+
+			toggleTabGroupSelection(1, false);
+			expect(tabGroups.value[0].selected).toBe(false);
+			expect(selectedImages.value).toEqual(['https://site-b.com/3.jpg']);
+
+			toggleTabGroupSelection(1, true);
+			expect(tabGroups.value[0].selected).toBe(true);
+			expect(selectedImages.value).toEqual([
+				'https://site-b.com/3.jpg',
+				'https://site-a.com/1.jpg',
+				'https://site-a.com/2.jpg',
+			]);
+
+			toggleTabGroupCollapse(1);
+			expect(tabGroups.value[0].collapsed).toBe(true);
+			toggleTabGroupCollapse(1);
+			expect(tabGroups.value[0].collapsed).toBe(false);
+
+			setAllTabGroupsCollapsed(true);
+			expect(tabGroups.value.every((g: any) => g.collapsed)).toBe(true);
+			setAllTabGroupsCollapsed(false);
+			expect(tabGroups.value.every((g: any) => !g.collapsed)).toBe(true);
+		});
 	});
 });

@@ -23,9 +23,13 @@
 	},
 	"permissions": [
 		"activeTab",
+		"tabs",
 		"scripting",
 		"downloads",
 		"sidePanel",
 		"storage"
+	],
+	"host_permissions": [
+		"<all_urls>"
 	]
 }

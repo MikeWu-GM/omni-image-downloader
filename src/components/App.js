@@ -9,7 +9,9 @@ import {
 	imagesCache,
 	initialize,
 	initialized,
+	extractionScope,
 	loadImagesFromActiveTab,
+	loadImagesFromCurrentWindow,
 	reloadImagesWhenPageLoads,
 	updateDetectedExtension,
 } from './data.js';
@@ -34,7 +36,13 @@ function AppWithoutErrorBoundary() {
 			chrome.tabs.onActivated.addListener(({ tabId }) => reloadImagesWhenPageLoads(tabId, {}, null));
 		}
 
-		initialize().then(() => loadImagesFromActiveTab({ waitForIdleDOM: false }));
+		initialize().then(() => {
+			if (extractionScope.value === 'current_window') {
+				loadImagesFromCurrentWindow({ waitForIdleDOM: false });
+			} else {
+				loadImagesFromActiveTab({ waitForIdleDOM: false });
+			}
+		});
 	}, []);
 
 	if (!initialized.value) {

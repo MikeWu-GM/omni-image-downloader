@@ -4,13 +4,16 @@ import {
 	currentSelectedImages,
 	downloadConfirmationIsShown,
 	downloadIsInProgress,
+	extractionScope,
 	folderName,
+	imageToTabMap,
 	maxConcurrentDownloads,
 	newFileName,
 	pageTitle,
 	pageUrl,
 	saveSourceUrl,
 	showDownloadConfirmation,
+	subfolderPerTab,
 } from './data.js';
 
 export const triggerDownload = async () => {
@@ -41,6 +44,23 @@ export const downloadImages = (/** @type {string[]} */ imagesToDownload) =>
 					}
 				: null;
 
+		const isWindowScope = extractionScope.value === 'current_window';
+		const subfolders =
+			isWindowScope && subfolderPerTab.value
+				? imagesToDownload.map((url) => {
+						const info = imageToTabMap.value.get(url);
+						return info ? info.folderName : '';
+					})
+				: undefined;
+
+		console.info(`[ID-Download] 🚀 Sending download batch to serviceWorker:`, {
+			count: imagesToDownload.length,
+			folder_name: folderName.value,
+			isWindowScope,
+			subfolderPerTab: subfolderPerTab.value,
+			subfoldersSample: subfolders ? subfolders.slice(0, 5) : 'none',
+		});
+
 		chrome.runtime.sendMessage(
 			{
 				type: 'downloadImages',
@@ -49,6 +69,7 @@ export const downloadImages = (/** @type {string[]} */ imagesToDownload) =>
 					folder_name: folderName.value,
 					new_file_name: newFileName.value,
 					source_url_file: sourceUrlFile,
+					subfolders,
 					max_concurrent_downloads: maxConcurrentDownloads.value,
 				},
 			},
