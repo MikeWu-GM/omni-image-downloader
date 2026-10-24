@@ -1,20 +1,20 @@
-🟦 Image Downloader
-━━━━━━━━━━━━━━━━━
-To save multiple photos at once, this extension enables you to:
-- Browse pictures on the active webpage
-- Filter by size, dimensions, or URL
-- Remove duplicates
-- Download or view any single photo with one click
-- Save to a subfolder
-- Rename downloaded files
-- Download in the background
+🟦 OmniImage Downloader
+━━━━━━━━━━━━━━━━━━━━━━━
+To save multiple photos at once across your active tab or entire browser window, this extension enables you to:
+- Extract pictures from the active webpage or all tabs in the current window
+- Filter in real time by natural dimensions, size presets, detected format, or URL regex
+- Automatically fold duplicate resolution variants
+- Download or inspect any single photo with one click
+- Auto-organize downloads into sanitized page-title subfolders with source page bookmarks
+- Rename downloaded files with sequential numbering and normalized extensions
+- Throttle concurrent downloads (1 to 128 parallel tasks) in the background
 
-Note: If no default download folder is set, you’ll need to choose a save location for each photo, which may trigger multiple popups. Configure a download directory in your browser settings for a smoother experience.
+Note: If no default download folder is set, you’ll need to choose a save location for each photo, which may trigger multiple popups. Configure a download directory in your browser settings (and disable "Ask where to save each file before downloading") for a smoother bulk download experience.
 
 ❓ FAQs
 ━━━━━━
-💭 Why does this extension need access to all site data?
-To extract photos from a webpage, Image Downloader must access all content when the popup is activated. No data is sent off your device. See our Privacy Policy for details: https://pactinteractive.github.io/image-downloader
+💭 Why does this extension need access to site data?
+To extract photos from webpages, OmniImage Downloader inspects the DOM when you activate the popup or side panel. 100% of extraction and filtering runs locally on your device — zero data, analytics, or browsing history is ever sent to any external server.
 
 💭 Why were some downloaded photos smaller or missing?
-Image Downloader only retrieves photos currently displayed on the page, which may be thumbnails rather than full-resolution versions (like in Facebook albums). Some sites, like Instagram, load only a few pictures at a time in carousels to save bandwidth. Consider using other specialized extensions tailored to downloading from Facebook or Instagram.
+OmniImage Downloader retrieves photos currently present in the page DOM, which on some websites may be thumbnails or lazy-loaded placeholders until scrolled into view.

@@ -3,7 +3,7 @@ name: Feature request
 about: Suggest an idea for the extension
 title: ''
 labels: 'type: feature'
-assignees: vdsabev
+assignees: MikeWu-GM
 
 ---
 

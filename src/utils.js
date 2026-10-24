@@ -109,7 +109,7 @@ export const generateSourceHtml = (url, title = '') => {
   <p>Redirecting to source webpage...</p>
   <p><a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeUrl}</a></p>
   <hr style="border: none; border-top: 1px solid #eee; margin: 1.5rem 0;" />
-  <p style="color: #666; font-size: 0.85rem;">Downloaded via Image Downloader</p>
+  <p style="color: #666; font-size: 0.85rem;">Downloaded via OmniImage Downloader</p>
 </body>
 </html>`;
 };

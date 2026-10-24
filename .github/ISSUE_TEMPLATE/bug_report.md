@@ -3,7 +3,7 @@ name: Bug report
 about: What seems to be the problem?
 title: ''
 labels: 'type: bug'
-assignees: vdsabev
+assignees: MikeWu-GM
 ---
 
 ## Setup

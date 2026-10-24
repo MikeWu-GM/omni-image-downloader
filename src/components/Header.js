@@ -123,15 +123,15 @@ export function Header(/** @type {Object} */ props) {
 		<header ...${props}>
 			<${Show} when=${hostnameIsLimited}>
 				<div class="bg-sky-100 p-2 text-sky-800">
-					<span class="text-shadow">🛡️</span> Image Downloader has limited access to sensitive domains like
+					<span class="text-shadow">🛡️</span> OmniImage Downloader has limited access to sensitive domains like
 					<b> ${hostname}</b>
 				</div>
 			<//>
 
 			<${Show} when=${scriptError}>
 				<div class="bg-amber-100 p-2 text-amber-800">
-					<span class="text-shadow">⚠️ </span> Image Downloader cannot access the contents of this page - please close
-					the extension and open it again
+					<span class="text-shadow">⚠️ </span> OmniImage Downloader cannot access the contents of this page - please
+					close the extension and open it again
 				</div>
 			<//>
 

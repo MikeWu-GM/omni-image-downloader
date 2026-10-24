@@ -1,16 +1,16 @@
 <h1 align="center">
-  <img src="images/logo.svg" alt="Image Downloader logo" height="40" valign="middle" />
-  &nbsp;Image Downloader
+  <img src="images/logo.svg" alt="OmniImage Downloader logo" height="40" valign="middle" />
+  &nbsp;OmniImage Downloader
 </h1>
 
 <p align="center">
-  <b>Browse and bulk-download images from any webpage. Clean, ultra-fast, and 100% private.</b>
+  <b>Extract, filter, and bulk-download images across active tabs or entire browser windows. Clean, ultra-fast, and 100% private.</b>
   <br />
   <sub>English | <a href="README_zh.md">简体中文</a></sub>
 </p>
 
 <p align="center">
-  <a href="https://github.com/PactInteractive/image-downloader/blob/master/LICENSE.md"><img src="https://img.shields.io/badge/license-GPLv3-blue.svg" alt="License" /></a>
+  <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-GPLv3-blue.svg" alt="License" /></a>
   <img src="https://img.shields.io/badge/Manifest-V3-success.svg" alt="Manifest V3" />
   <img src="https://img.shields.io/badge/runtime-Bun-f472b6.svg" alt="Bun" />
   <img src="https://img.shields.io/badge/architecture-No--Bundler-purple.svg" alt="No Bundler" />
@@ -18,19 +18,20 @@
 
 Welcome! If you are here to learn how to use this extension, check out the [User Guide](USERGUIDE.md).
 
-If you are a developer looking to build, customize, or contribute to the extension locally instead of installing from the Chrome Web Store — keep reading!
+If you are a developer looking to build, customize, or contribute to **OmniImage Downloader** locally — keep reading!
 
 ---
 
 ## ✨ Key Features
 
-- **⚡ Instant Response & Ultra-lightweight**: Built with Preact 11 + Signals and native browser ESM (`htm`). No heavy bundlers (Webpack/Vite/Babel), sub-50ms startup time, near-zero memory footprint.
-- **🔍 Deep Image Sniffing**: Recursively traverses standard `<img>` tags, CSS `background-image`, Web Components inside `ShadowRoot`, and page-sandboxed `Blob`/Canvas objects.
+- **🗂️ Window-Wide Multi-Tab Extraction**: Switch seamlessly between **Current Tab** and **Current Window** scopes to harvest images across all open tabs at once, grouped by tab with collapsible headers and isolated per-tab subfolder downloads.
+- **⚡ High-Concurrency Download Engine**: Configurable parallel download throttling (`1` to `128` concurrent downloads) with automatic Blob/format sniffing queues and real-time progress tracking in the sticky status toolbar.
+- **🎯 Natural Dimension & Dynamic Format Filtering**: Reads true `naturalWidth` / `naturalHeight` directly from the live DOM, detects actual image formats dynamically (including extensionless CDN URLs and WebP), and normalizes file extensions on save.
+- **📁 Smart Subfolders & Source Bookmarks**: Automatically prefills sanitized webpage titles as download subfolders, disambiguates duplicate tab folder names, and optionally generates a local `source.html` redirect bookmark alongside downloaded assets.
+- **🔒 Tab-Scoped Side Panel Isolation**: Run in either floating Popup mode or persistent **Side Panel** mode locked to its originating tab without cross-tab state pollution.
+- **🔍 Deep DOM & ShadowRoot Sniffing**: Recursively traverses standard `<img>` tags, CSS `background-image`, Web Components inside `ShadowRoot`, and page-sandboxed `Blob`/Canvas objects.
 - **🧹 Smart Deduplication Engine**: Automatically folds `@2x` retina assets and numeric width suffixes (`-500x500`), matching hash patterns across folders while isolating multi-level country domains (`.co.uk`).
-- **🛡️ 100% Private & Local**: Zero analytics, zero ads, zero tracking. All extraction and filtering run purely on your local machine; no webpage or image data is ever uploaded to external servers.
-- **🎯 Precise Filtering**: Filter images on-the-fly by natural width, height, aspect ratio, image type, and URL patterns/regex.
-- **📁 Subfolders & Renaming**: Easily download selected images into dedicated subfolders with customizable sequential numbering.
-- **🌓 Dark Mode & Side Panel**: Supports both floating popup and persistent Side Panel modes with automatic theme adaptation.
+- **🛡️ 100% Private & Local**: Zero analytics, zero ads, zero tracking, zero external requests. Everything runs purely on your local machine.
 
 ---
 
@@ -62,7 +63,7 @@ Start the development server with automatic watch and live rebuild:
 bun start
 ```
 
-Or perform a one-off build:
+Or perform a one-off production build (including `dist/*.zip` archives):
 - **macOS / Linux**:
   ```bash
   bun run build
@@ -112,7 +113,7 @@ bun run lint
 
 This project deliberately avoids traditional bundlers:
 - **`src/`**: Plain JavaScript using `htm` and Preact Signals. No JSX compilation required.
-- **`scripts/build.ts`**: Minimal Bun-powered build script that compiles Tailwind CSS v4, copies static assets, and maps module specifiers to `/lib/*.mjs`.
+- **`scripts/build.ts`**: Minimal Bun-powered build script that compiles Tailwind CSS v4, generates multi-size icons via `sharp`, copies static assets, and maps module specifiers to `/lib/*.mjs`.
 - **`build/`**: The standalone MV3 output directory loaded by Chromium browsers.
 - **`build-firefox/`**: Dedicated output directory adapted for Firefox APIs.
 
@@ -120,7 +121,8 @@ For detailed developer rules and TDD discipline, see [AGENTS.md](AGENTS.md).
 
 ---
 
-## 📄 License & Author
+## 📄 License & Credits
 
-- Author: **Vladimir Sabev** ([@vdsabev](https://x.com/vdsabev)) / [PactInteractive](https://github.com/PactInteractive)
-- License: Based on [GNU General Public License v3 (GPLv3)](LICENSE.md) with an additional restriction on commercial resale and modification.
+- **Maintainer**: **MikeWu-GM** ([MikeWu-GM/omni-image-downloader](https://github.com/MikeWu-GM/omni-image-downloader)) — Independent enhanced hard fork featuring window-wide multi-tab extraction, high-concurrency download scheduling, dynamic format normalization, and a redesigned compact UI.
+- **Upstream Attribution**: Originally forked from [PactInteractive/image-downloader](https://github.com/PactInteractive/image-downloader) by **Vladimir Sabev** ([@vdsabev](https://x.com/vdsabev)).
+- **License**: Licensed under the [GNU General Public License v3 (GPLv3)](LICENSE.md).

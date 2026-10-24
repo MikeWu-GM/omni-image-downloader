@@ -40,8 +40,8 @@ export async function buildZip() {
 	await fs.ensureDir(distDir);
 
 	const targets: [string, string][] = [
-		[resolve(config.build), join(distDir, 'image-downloader.zip')],
-		[resolve(config.firefox.build), join(distDir, 'image-downloader-firefox.zip')],
+		[resolve(config.build), join(distDir, 'omni-image-downloader.zip')],
+		[resolve(config.firefox.build), join(distDir, 'omni-image-downloader-firefox.zip')],
 	];
 
 	for (const [srcDir, zipDest] of targets) {

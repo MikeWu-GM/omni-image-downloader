@@ -27,4 +27,12 @@ describe('About page', () => {
 		const commercialLinks = container.querySelectorAll('a[href*="cutoutmagic"], a[href*="gumroad"]');
 		expect(commercialLinks.length).toBe(0);
 	});
+
+	it('displays OmniImage Downloader branding and independent fork attribution', () => {
+		render(html`<${About} />`, container);
+
+		expect(container.textContent).toContain('OmniImage Downloader');
+		const repoLink = container.querySelector('a[href="https://github.com/MikeWu-GM/omni-image-downloader"]');
+		expect(repoLink).not.toBeNull();
+	});
 });

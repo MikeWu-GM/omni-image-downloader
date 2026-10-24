@@ -35,7 +35,7 @@ export class ErrorBoundary extends Component {
 					>
 						<hgroup>
 							<h2 style=${{ color: '#dc2626', margin: '0 0 8px 0', fontSize: '18px' }}>
-								Image Downloader encountered an error
+								OmniImage Downloader encountered an error
 							</h2>
 
 							<p style=${{ color: '#7f1d1d', margin: '0 0 12px 0', fontSize: '14px', lineHeight: '1.5' }}>

@@ -1,6 +1,7 @@
 # License
 Based on GNU General Public License v3
 Copyright © 2012-2026 Vladimir Sabev
+Copyright © 2026 MikeWu-GM (OmniImage Downloader: multi-tab extraction, concurrent download engine, dynamic format detection & UI redesign)
 
 This software is licensed under the GNU General Public License v3 (GPLv3) with an additional restriction on commercial resale and modification. The full GPLv3 text is available at: https://www.gnu.org/licenses/gpl-3.0.en.html.
 
