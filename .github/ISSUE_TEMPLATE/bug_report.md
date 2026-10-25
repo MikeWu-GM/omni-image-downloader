@@ -15,7 +15,7 @@ assignees: MikeWu-GM
 A short description of what the bug is.
 
 ## URL
-URL where you're experiencing the issue (for example: https://www.reddit.com)
+URL where you're experiencing the issue (for example: https://example.com)
 
 ## Screenshots
 If applicable, add screenshots to help explain your problem.

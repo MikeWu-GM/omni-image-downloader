@@ -11,7 +11,7 @@ assignees: MikeWu-GM
 A short description of your idea.
 
 ## URL
-URL where you think this feature would be useful (for example: https://www.reddit.com)
+URL where you think this feature would be useful (for example: https://example.com)
 
 ## Screenshots
 If applicable, add screenshots to help explain your idea.
