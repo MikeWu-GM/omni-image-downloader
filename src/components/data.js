@@ -961,3 +961,88 @@ export const reloadImagesWhenPageLoads = action(
 		}
 	}
 );
+
+export const isAutoScrolling = signal(false);
+
+/**
+ * Injected into the target page to scroll smoothly down in steps
+ * @param {number} [maxSteps]
+ * @param {number} [stepPx]
+ * @param {number} [delayMs]
+ */
+export async function pageScrollDown(maxSteps = 15, stepPx = 600, delayMs = 120) {
+	// @ts-ignore
+	window.__omniScrollCancelled = false;
+	let steps = 0;
+	let lastScrollTop = -1;
+	while (steps < maxSteps) {
+		// @ts-ignore
+		if (window.__omniScrollCancelled) break;
+		const currentScrollTop = window.scrollY || document.documentElement.scrollTop;
+		const maxScrollTop = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+		if (currentScrollTop >= maxScrollTop && steps > 0) break;
+		if (currentScrollTop === lastScrollTop && steps > 1) break;
+		lastScrollTop = currentScrollTop;
+		window.scrollBy({ top: stepPx, behavior: 'smooth' });
+		steps++;
+		await new Promise((r) => setTimeout(r, delayMs));
+	}
+	return steps;
+}
+
+export function cancelPageScroll() {
+	// @ts-ignore
+	window.__omniScrollCancelled = true;
+}
+
+export const toggleAutoScroll = action(
+	async (/** @type {{ maxSteps?: number, stepPx?: number, delayMs?: number }} */ options = {}) => {
+		if (isAutoScrolling.value) {
+			isAutoScrolling.value = false;
+			const targetId = getLockedTabId();
+			if (targetId != null && chrome.scripting?.executeScript) {
+				chrome.scripting
+					.executeScript({
+						target: { tabId: targetId },
+						func: cancelPageScroll,
+					})
+					.catch(() => {});
+			}
+			return;
+		}
+
+		isAutoScrolling.value = true;
+		try {
+			let targetId = getLockedTabId();
+			if (targetId == null && chrome.tabs?.query) {
+				const currentWindow = await new Promise((resolve) =>
+					chrome.windows?.getCurrent ? chrome.windows.getCurrent(resolve) : resolve(null)
+				);
+				const tabs = await new Promise((resolve) =>
+					chrome.tabs.query({ active: true, windowId: currentWindow?.id }, resolve)
+				);
+				if (tabs && tabs[0]?.id != null) {
+					targetId = tabs[0].id;
+					setLockedTabId(targetId);
+				}
+			}
+
+			if (targetId != null && chrome.scripting?.executeScript) {
+				await chrome.scripting.executeScript({
+					target: { tabId: targetId },
+					func: pageScrollDown,
+					args: [options.maxSteps ?? 15, options.stepPx ?? 600, options.delayMs ?? 120],
+				});
+			}
+		} catch (error) {
+			console.warn('[ID-AutoScroll] ⚠️ Auto-scroll execution failed:', error);
+		} finally {
+			isAutoScrolling.value = false;
+			if (extractionScope.value === 'current_window') {
+				loadImagesFromCurrentWindow({ waitForIdleDOM: 1 });
+			} else {
+				loadImagesFromActiveTab({ waitForIdleDOM: 1 });
+			}
+		}
+	}
+);

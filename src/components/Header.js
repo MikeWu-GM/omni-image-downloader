@@ -12,6 +12,8 @@ import {
 	filterMaxWidth,
 	filterMaxWidthEnabled,
 	filterMinHeightEnabled,
+	isAutoScrolling,
+	toggleAutoScroll,
 	filterMinWidth,
 	filterMinWidthEnabled,
 	filterSizePreset,
@@ -234,6 +236,24 @@ export function Header(/** @type {Object} */ props) {
 						}}
 					>
 						<img class="w-3" src="/images/reload.svg" />
+					</button>
+
+					<button
+						type="button"
+						id="auto_scroll_button"
+						class="${
+							isAutoScrolling.value
+								? 'border-sky-600 bg-sky-50 text-sky-600 dark:border-sky-500 dark:bg-sky-950 dark:text-sky-300 animate-pulse'
+								: 'border-slate-300 hover:bg-slate-100 text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800'
+						} flex size-7 min-w-7 cursor-pointer items-center justify-center rounded border transition-colors"
+						title=${
+							isAutoScrolling.value ? 'Stop auto-scrolling' : 'Auto-scroll page smoothly to trigger lazy-loaded images'
+						}
+						onClick=${() => toggleAutoScroll()}
+					>
+						<svg class="w-3.5 fill-current" viewBox="0 0 24 24">
+							<path d="M11 4h2v10.17l3.59-3.58L18 12l-6 6-6-6 1.41-1.41L11 14.17V4zM4 20h16v2H4v-2z" />
+						</svg>
 					</button>
 
 					<input

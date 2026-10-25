@@ -3,6 +3,8 @@ build-firefox
 coverage
 dist
 node_modules
+test-results/
+playwright-report/
 
 # IDE and Editor files
 .vscode/

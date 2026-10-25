@@ -6,6 +6,10 @@ mockDOM();
 import {
 	allImages,
 	applySizePreset,
+	cancelPageScroll,
+	isAutoScrolling,
+	pageScrollDown,
+	toggleAutoScroll,
 	columns,
 	currentSelectedImages,
 	customLargeThreshold,
@@ -892,6 +896,47 @@ describe('currentSelectedImages', () => {
 			expect(tabGroups.value.every((g: any) => g.collapsed)).toBe(true);
 			setAllTabGroupsCollapsed(false);
 			expect(tabGroups.value.every((g: any) => !g.collapsed)).toBe(true);
+		});
+	});
+
+	describe('auto-scroll lazy-loading feature', () => {
+		it('handles pageScrollDown and cancelPageScroll', async () => {
+			(globalThis as any).window.__omniScrollCancelled = false;
+			let mockScrollY = 0;
+			Object.defineProperty(window, 'scrollY', {
+				get: () => mockScrollY,
+				set: (v) => {
+					mockScrollY = v;
+				},
+				configurable: true,
+			});
+			(globalThis as any).window.innerHeight = 800;
+			Object.defineProperty(document.documentElement, 'scrollHeight', {
+				value: 3000,
+				configurable: true,
+			});
+			(globalThis as any).window.scrollBy = mock(({ top }: any) => {
+				mockScrollY += top;
+			});
+
+			const steps = await pageScrollDown(3, 500, 1);
+			expect(steps).toBe(3);
+			expect(mockScrollY).toBe(1500);
+
+			cancelPageScroll();
+			expect((globalThis as any).window.__omniScrollCancelled).toBe(true);
+		});
+
+		it('toggles isAutoScrolling state and triggers image reloading', async () => {
+			setLockedTabId(99);
+			const executeScriptMock = mock(() => Promise.resolve([{ result: 2 }]));
+			(globalThis as any).chrome.scripting = { executeScript: executeScriptMock };
+
+			expect(isAutoScrolling.value).toBe(false);
+			const scrollPromise = toggleAutoScroll({ maxSteps: 2, stepPx: 100, delayMs: 1 });
+			await scrollPromise;
+			expect(isAutoScrolling.value).toBe(false);
+			expect(executeScriptMock).toHaveBeenCalled();
 		});
 	});
 });

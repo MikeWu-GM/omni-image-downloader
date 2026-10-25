@@ -312,4 +312,11 @@ describe('Header component & defaults hygiene', () => {
 		moreColsBtn.click();
 		expect(columns.value).toBe(2);
 	});
+
+	it('renders auto_scroll_button and toggles auto-scroll state', () => {
+		render(html`<${Header} />`, container);
+		const scrollBtn = container.querySelector('#auto_scroll_button') as HTMLButtonElement;
+		expect(scrollBtn).not.toBeNull();
+		expect(scrollBtn.getAttribute('title')).toContain('Auto-scroll');
+	});
 });
