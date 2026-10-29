@@ -232,6 +232,9 @@ export const initialize = action(async () => {
 		max_concurrent_downloads: maxConcurrentDownloads,
 		selected_images: selectedImages,
 		columns: columns,
+		extraction_scope: extractionScope,
+		group_by_tab: groupByTab,
+		subfolder_per_tab: subfolderPerTab,
 	};
 	for (const key in options) {
 		const defaultValue = defaults[/** @type {keyof Options} */ (key)];
@@ -452,8 +455,6 @@ export const matchingImages = computed(() => {
 		const smallThreshold = customSmallThreshold.value;
 
 		filtered = filtered.filter((url) => {
-			if (!imagesCache.value) return false;
-
 			const cachedDim = effectiveDimensions[url];
 			let width = cachedDim?.width;
 			let height = cachedDim?.height;
@@ -538,9 +539,112 @@ export const limitedAccessHostnames = /\.google\.com/;
 export const scriptError = signal('');
 
 const browserPageUrl = /^(about|chrome|chrome-extension|edge|moz-extension|view-source):/;
+const SCRIPT_TIMEOUT_MS = 3500;
+const MAIN_FRAME_FALLBACK_TIMEOUT_MS = 2500;
+const BLOB_READ_TIMEOUT_MS = 2500;
+
+/**
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {number} timeoutMs
+ * @returns {Promise<T>}
+ */
+function withExtractionTimeout(promise, timeoutMs) {
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			const err = /** @type {Error & { isExtractionTimeout?: boolean }} */ (
+				new Error(`Script injection timed out after ${timeoutMs}ms`)
+			);
+			err.isExtractionTimeout = true;
+			reject(err);
+		}, timeoutMs);
+		/** @type {any} */ (timer)?.unref?.();
+
+		promise.then(
+			(val) => {
+				clearTimeout(timer);
+				resolve(val);
+			},
+			(err) => {
+				clearTimeout(timer);
+				reject(err);
+			}
+		);
+	});
+}
+
+function isSubframeTransientError(/** @type {any} */ error) {
+	if (error?.isExtractionTimeout) return true;
+	const msg = String(error?.message || '');
+	return /Frame with ID|frame was removed|showing error page/i.test(msg);
+}
+
+async function executeFindImagesOnTab(/** @type {number} */ tabId, /** @type {number | false} */ waitForIdleDOM) {
+	const idleBudget =
+		typeof waitForIdleDOM === 'number' && waitForIdleDOM > 0 ? Math.min(waitForIdleDOM * 2.5, 2500) : 0;
+	try {
+		return await withExtractionTimeout(
+			chrome.scripting.executeScript({
+				target: { tabId, allFrames: true },
+				injectImmediately: true,
+				func: findImages,
+				args: [{ waitForIdleDOM }],
+			}),
+			SCRIPT_TIMEOUT_MS + idleBudget
+		);
+	} catch (error) {
+		if (!isSubframeTransientError(error)) {
+			throw error;
+		}
+		return await withExtractionTimeout(
+			chrome.scripting.executeScript({
+				target: { tabId, frameIds: [0] },
+				injectImmediately: true,
+				func: findImages,
+				args: [{ waitForIdleDOM }],
+			}),
+			MAIN_FRAME_FALLBACK_TIMEOUT_MS + idleBudget
+		);
+	}
+}
+
+function mergeDimensionsForUrls(
+	/** @type {string[]} */ urls,
+	/** @type {Record<string, { width: number; height: number }>} */ existingDims,
+	/** @type {Record<string, { width: number; height: number }>} */ incomingDims
+) {
+	/** @type {Record<string, { width: number; height: number }>} */
+	const merged = {};
+	for (const url of urls) {
+		const prev = existingDims[url];
+		const next = incomingDims[url];
+		if (prev && next) {
+			merged[url] = next.width * next.height >= prev.width * prev.height ? next : prev;
+		} else if (next && next.width > 0 && next.height > 0) {
+			merged[url] = next;
+		} else if (prev && prev.width > 0 && prev.height > 0) {
+			merged[url] = prev;
+		}
+	}
+	return merged;
+}
+
+function retainDetectedExtensionsForUrls(
+	/** @type {string[]} */ urls,
+	/** @type {Record<string, string>} */ existingExts
+) {
+	/** @type {Record<string, string>} */
+	const retained = {};
+	for (const url of urls) {
+		if (existingExts[url]) {
+			retained[url] = existingExts[url];
+		}
+	}
+	return retained;
+}
 
 function executeOnTab(
-	/** @type {chrome.tabs.Tab | { id: number, url?: string, title?: string, incognito?: boolean }} */ activeTab,
+	/** @type {chrome.tabs.Tab | { id: number, url?: string, title?: string, status?: string, incognito?: boolean }} */ activeTab,
 	/** @type {number | false} */ waitForIdleDOM
 ) {
 	isIncognitoContext.value = Boolean(activeTab.incognito);
@@ -560,33 +664,31 @@ function executeOnTab(
 	if (activeTab.id == null) return;
 	const tabId = activeTab.id;
 
-	chrome.scripting
-		.executeScript({
-			target: { tabId, allFrames: true },
-			func: findImages,
-			args: [{ waitForIdleDOM }],
-		})
+	executeFindImagesOnTab(tabId, waitForIdleDOM)
 		.then((messages) => Promise.all(messages.map((message) => withBlobUrlsRead(tabId, message))))
 		.then((messages) => {
 			batch(() => {
-				allImages.value = unique(messages.flatMap((message) => message.result?.allImages || []));
-				linkedImages.value = unique(messages.flatMap((message) => message.result?.linkedImages || []));
-				const dimensions = /** @type {Record<string, { width: number; height: number }>} */ ({});
+				const nextAllImages = unique(messages.flatMap((message) => message.result?.allImages || []));
+				const nextLinkedImages = unique(messages.flatMap((message) => message.result?.linkedImages || []));
+				const incomingDimensions = /** @type {Record<string, { width: number; height: number }>} */ ({});
 				for (const message of messages) {
 					if (message.result?.imageDimensions) {
-						Object.assign(dimensions, message.result.imageDimensions);
+						Object.assign(incomingDimensions, message.result.imageDimensions);
 					}
 				}
-				imageDimensions.value = dimensions;
+				allImages.value = nextAllImages;
+				linkedImages.value = nextLinkedImages;
+				imageDimensions.value = mergeDimensionsForUrls(nextAllImages, imageDimensions.peek(), incomingDimensions);
 				// Use `allImages` to preserve original DOM order.
-				erroredImages.value = allImages.value.filter(isIncludedIn(erroredImages.value));
-				selectedImages.value = allImages.value.filter(isIncludedIn(selectedImages.value));
+				erroredImages.value = nextAllImages.filter(isIncludedIn(erroredImages.value));
+				selectedImages.value = nextAllImages.filter(isIncludedIn(selectedImages.value));
 
-				// Reset detected extensions and prune invalid formats that do not exist on the new page
-				detectedImageExtensions.value = {};
+				// Retain already-detected dynamic extensions for surviving URLs and prune absent formats
+				const retainedExtensions = retainDetectedExtensionsForUrls(nextAllImages, detectedImageExtensions.peek());
+				detectedImageExtensions.value = retainedExtensions;
 				if (selectedFormats.value.length > 0) {
 					const currentFormats = new Set(
-						allImages.value.map((url) => normalizeExtension(getImageExtension(url)) || 'other')
+						nextAllImages.map((url) => normalizeExtension(retainedExtensions[url] || getImageExtension(url)) || 'other')
 					);
 					selectedFormats.value = selectedFormats.value.filter((fmt) => currentFormats.has(fmt));
 				}
@@ -617,6 +719,7 @@ function executeOnTab(
 			const msg = error?.message || '';
 			// Ignore expected browser/permission errors that happen regularly when navigating around
 			if (
+				error?.isExtractionTimeout ||
 				msg === 'Cannot access a chrome:// URL' ||
 				msg.startsWith('Cannot access a chrome') ||
 				msg.startsWith('Cannot access contents of') ||
@@ -690,14 +793,16 @@ async function withBlobUrlsRead(/** @type {number} */ tabId, /** @type {Message}
 	const blobUrls = unique([...result.allImages, ...result.linkedImages].filter((url) => url.startsWith('blob:')));
 	if (blobUrls.length === 0) return message;
 
-	const [injection] = await chrome.scripting
-		.executeScript({
+	const [injection] = await withExtractionTimeout(
+		chrome.scripting.executeScript({
 			target: { tabId, frameIds: [message.frameId] },
 			world: 'MAIN',
+			injectImmediately: true,
 			func: readBlobUrls,
 			args: [blobUrls],
-		})
-		.catch(() => []);
+		}),
+		BLOB_READ_TIMEOUT_MS
+	).catch(() => []);
 	/** @type {unknown[]} */
 	const dataUrls = Array.isArray(injection?.result) ? injection.result : [];
 
@@ -719,12 +824,8 @@ async function extractImagesFromTab(/** @type {any} */ tab, /** @type {number | 
 	if (tab.id == null) return null;
 	const tabId = tab.id;
 	try {
-		console.info(`[ID-Window] 🔍 Extracting from Tab ${tabId} ("${tab.title || tab.url || 'Pending Tab'}") ...`);
-		const messages = await chrome.scripting.executeScript({
-			target: { tabId, allFrames: true },
-			func: findImages,
-			args: [{ waitForIdleDOM }],
-		});
+		console.info(`[ID-Window] Extracting from Tab ${tabId} ("${tab.title || tab.url || 'Pending Tab'}") ...`);
+		const messages = await executeFindImagesOnTab(tabId, waitForIdleDOM);
 		const processed = await Promise.all(messages.map((m) => withBlobUrlsRead(tabId, m)));
 		const tabAllImages = unique(processed.flatMap((m) => m.result?.allImages || []));
 		const tabLinkedImages = unique(processed.flatMap((m) => m.result?.linkedImages || []));
@@ -737,7 +838,7 @@ async function extractImagesFromTab(/** @type {any} */ tab, /** @type {number | 
 		const topMessage = processed.find((m) => m.frameId === 0);
 		const tabTitle = topMessage?.result?.title || tab.title || '';
 		const tabOrigin = topMessage?.result?.origin || '';
-		console.info(`[ID-Window] ✅ Tab ${tabId} success: ${tabAllImages.length} images found (title: "${tabTitle}")`);
+		console.info(`[ID-Window] Tab ${tabId} success: ${tabAllImages.length} images found (title: "${tabTitle}")`);
 		return {
 			allImages: tabAllImages,
 			linkedImages: tabLinkedImages,
@@ -747,35 +848,38 @@ async function extractImagesFromTab(/** @type {any} */ tab, /** @type {number | 
 		};
 	} catch (error) {
 		const errMsg = /** @type {any} */ (error)?.message || String(error);
-		console.warn(`[ID-Window] ⚠️ Tab ${tabId} extraction failed:`, errMsg);
+		console.warn(`[ID-Window] Tab ${tabId} extraction failed:`, errMsg);
 		throw error;
 	}
 }
 
+let windowLoadSequence = 0;
+
 export const loadImagesFromCurrentWindow = action(
 	(/** @type {{ waitForIdleDOM: number | false }} */ { waitForIdleDOM } = { waitForIdleDOM: false }) => {
+		const currentSeq = ++windowLoadSequence;
 		return new Promise((resolve) => {
 			chrome.windows.getCurrent(async (currentWindow) => {
 				if (chrome.runtime?.lastError || !currentWindow) {
-					console.warn('[ID-Window] ⚠️ Failed to get current window:', chrome.runtime?.lastError?.message);
+					console.warn('[ID-Window] Failed to get current window:', chrome.runtime?.lastError?.message);
 					resolve(undefined);
 					return;
 				}
 				chrome.tabs.query({ windowId: currentWindow.id }, async (tabs) => {
 					if (chrome.runtime?.lastError || !tabs || tabs.length === 0) {
-						console.warn('[ID-Window] ⚠️ Failed to query tabs for window:', chrome.runtime?.lastError?.message);
+						console.warn('[ID-Window] Failed to query tabs for window:', chrome.runtime?.lastError?.message);
 						resolve(undefined);
 						return;
 					}
 
 					console.info(
-						`[ID-Window] 🗂️ Query returned ${tabs.length} tabs for window ${currentWindow.id}:`,
+						`[ID-Window] Query returned ${tabs.length} tabs for window ${currentWindow.id}:`,
 						tabs.map((t) => ({ id: t.id, title: t.title, url: t.url, active: t.active }))
 					);
 
 					const validTabs = tabs.filter((t) => t.id != null && (!t.url || !browserPageUrl.test(t.url)));
 					isIncognitoContext.value = validTabs.some((t) => Boolean(t.incognito));
-					console.info(`[ID-Window] 🎯 Usable web tabs after system filtering: ${validTabs.length}`);
+					console.info(`[ID-Window] Usable web tabs after system filtering: ${validTabs.length}`);
 
 					if (validTabs.length === 0) {
 						tabGroups.value = [];
@@ -814,99 +918,100 @@ export const loadImagesFromCurrentWindow = action(
 
 					tabGroups.value = groups;
 
-					const tabResults = await Promise.allSettled(
-						validTabs.map(async (tab, index) => {
-							try {
-								const res = await extractImagesFromTab(tab, waitForIdleDOM);
-								return { index, tab, res };
-							} catch (err) {
-								const errMsg = /** @type {any} */ (err)?.message || String(err);
-								return { index, tab, error: errMsg };
-							}
-						})
-					);
+					const commitWindowGroups = () => {
+						if (currentSeq !== windowLoadSequence) return;
+						batch(() => {
+							const newMap = new Map();
+							const aggregatedAll = [];
+							const aggregatedLinked = [];
+							const aggregatedDimensions = /** @type {Record<string, { width: number; height: number }>} */ ({});
 
-					batch(() => {
-						const newMap = new Map();
-						const aggregatedAll = [];
-						const aggregatedLinked = [];
-						const aggregatedDimensions = /** @type {Record<string, { width: number; height: number }>} */ ({});
+							const rawFolderNames = groups.map((group) =>
+								sanitizeFolderName(group.title || group.hostname, group.hostname)
+							);
+							const uniqueFolderNames = disambiguateFolderNames(rawFolderNames);
 
-						const rawFolderNames = groups.map((group, idx) => {
-							const resultItem = tabResults[idx];
-							if (resultItem.status === 'fulfilled' && resultItem.value.res) {
-								const safeTitle = resultItem.value.res.title || group.title;
-								return sanitizeFolderName(safeTitle, group.hostname);
+							/** @type {TabGroup[]} */
+							const snapshotGroups = groups.map((group, idx) => ({
+								...group,
+								folderName: uniqueFolderNames[idx],
+							}));
+
+							tabGroups.value = snapshotGroups;
+
+							for (const g of snapshotGroups) {
+								aggregatedAll.push(...g.allImages);
+								aggregatedLinked.push(...g.linkedImages);
+								Object.assign(aggregatedDimensions, g.imageDimensions);
+
+								for (const imgUrl of g.allImages) {
+									newMap.set(imgUrl, {
+										tabId: g.id,
+										title: g.title,
+										folderName: g.folderName,
+									});
+								}
 							}
-							return group.folderName;
+
+							const nextAllImages = unique(aggregatedAll);
+							imageToTabMap.value = newMap;
+							allImages.value = nextAllImages;
+							linkedImages.value = unique(aggregatedLinked);
+							imageDimensions.value = mergeDimensionsForUrls(
+								nextAllImages,
+								imageDimensions.peek(),
+								aggregatedDimensions
+							);
+							detectedImageExtensions.value = retainDetectedExtensionsForUrls(
+								nextAllImages,
+								detectedImageExtensions.peek()
+							);
+							erroredImages.value = nextAllImages.filter(isIncludedIn(erroredImages.value));
+							selectedImages.value = nextAllImages.filter(isIncludedIn(selectedImages.value));
+
+							if (!isFolderCustomized.value) {
+								// In window mode with subfolders, leave parent folderName empty so images download
+								// directly into each tab's subfolder (e.g. <Downloads>/<Tab_Title>/<file>) without a redundant outer wrapper.
+								folderName.value = '';
+							}
 						});
-						const uniqueFolderNames = disambiguateFolderNames(rawFolderNames);
+					};
 
-						/** @type {TabGroup[]} */
-						const updatedGroups = groups.map((group, idx) => {
-							const resultItem = tabResults[idx];
-							const folder = uniqueFolderNames[idx];
-							if (resultItem.status === 'fulfilled') {
-								const { res, error } = resultItem.value;
+					await Promise.allSettled(
+						validTabs.map(async (tabItem, idx) => {
+							try {
+								const res = await extractImagesFromTab(tabItem, waitForIdleDOM);
 								if (res) {
-									const safeTitle = res.title || group.title;
-									return {
-										...group,
-										title: safeTitle,
-										folderName: folder,
+									groups[idx] = {
+										...groups[idx],
+										title: res.title || groups[idx].title,
 										allImages: res.allImages,
 										linkedImages: res.linkedImages,
 										imageDimensions: res.imageDimensions,
-										status: /** @type {'idle' | 'loading' | 'loaded' | 'error'} */ ('loaded'),
-									};
-								} else if (error) {
-									return {
-										...group,
-										folderName: folder,
-										status: /** @type {'idle' | 'loading' | 'loaded' | 'error'} */ ('error'),
-										error,
+										status: 'loaded',
+										error: '',
 									};
 								}
+							} catch (err) {
+								const errMsg = /** @type {any} */ (err)?.message || String(err);
+								groups[idx] = {
+									...groups[idx],
+									status: 'error',
+									error: errMsg,
+								};
 							}
-							return { ...group, folderName: folder };
-						});
+							commitWindowGroups();
+						})
+					);
 
-						tabGroups.value = updatedGroups;
-
-						for (const g of updatedGroups) {
-							aggregatedAll.push(...g.allImages);
-							aggregatedLinked.push(...g.linkedImages);
-							Object.assign(aggregatedDimensions, g.imageDimensions);
-
-							for (const imgUrl of g.allImages) {
-								newMap.set(imgUrl, {
-									tabId: g.id,
-									title: g.title,
-									folderName: g.folderName,
-								});
-							}
-						}
-
-						imageToTabMap.value = newMap;
-						allImages.value = unique(aggregatedAll);
-						linkedImages.value = unique(aggregatedLinked);
-						imageDimensions.value = aggregatedDimensions;
-						erroredImages.value = allImages.value.filter(isIncludedIn(erroredImages.value));
-						selectedImages.value = allImages.value.filter(isIncludedIn(selectedImages.value));
-
+					if (currentSeq === windowLoadSequence) {
 						console.info(
-							`[ID-Window] 📊 Aggregated total: ${allImages.value.length} unique images across ${updatedGroups.length} tabs`
+							`[ID-Window] Aggregated total: ${allImages.value.length} unique images across ${tabGroups.value.length} tabs`
 						);
 
-						if (!isFolderCustomized.value) {
-							// In window mode with subfolders, leave parent folderName empty so images download
-							// directly into each tab's subfolder (e.g. <Downloads>/<Tab_Title>/<file>) without a redundant outer wrapper.
-							folderName.value = '';
+						if (!waitForIdleDOM) {
+							loadImagesFromCurrentWindow({ waitForIdleDOM: 1000 });
 						}
-					});
-
-					if (!waitForIdleDOM) {
-						loadImagesFromCurrentWindow({ waitForIdleDOM: 1000 });
 					}
 					resolve(undefined);
 				});
@@ -942,8 +1047,45 @@ export const setAllTabGroupsCollapsed = action((/** @type {boolean} */ collapsed
 	tabGroups.value = tabGroups.value.map((/** @type {TabGroup} */ g) => ({ ...g, collapsed }));
 });
 
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let progressiveTabScanTimer;
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let progressiveWindowScanTimer;
+
 export const reloadImagesWhenPageLoads = action(
 	(/** @type {number | undefined}*/ tabId, /** @type {any} */ changeInfo, /** @type {any} */ tab) => {
+		if (extractionScope.value === 'current_window') {
+			if (!tab) {
+				if (getLockedTabId() != null) return;
+				if (tabGroups.value.length === 0) {
+					loadImagesFromCurrentWindow({ waitForIdleDOM: 1 });
+				}
+				return;
+			}
+
+			if (tab.url && browserPageUrl.test(tab.url)) return;
+
+			if (changeInfo?.status === 'complete') {
+				if (progressiveWindowScanTimer !== undefined) {
+					clearTimeout(progressiveWindowScanTimer);
+					progressiveWindowScanTimer = undefined;
+				}
+				loadImagesFromCurrentWindow({ waitForIdleDOM: false });
+			} else if (changeInfo?.status === 'loading' || changeInfo?.url) {
+				if (progressiveWindowScanTimer !== undefined) {
+					clearTimeout(progressiveWindowScanTimer);
+				}
+				progressiveWindowScanTimer = setTimeout(() => {
+					progressiveWindowScanTimer = undefined;
+					if (extractionScope.value === 'current_window') {
+						loadImagesFromCurrentWindow({ waitForIdleDOM: 1 });
+					}
+				}, 250);
+				/** @type {any} */ (progressiveWindowScanTimer)?.unref?.();
+			}
+			return;
+		}
+
 		const targetId = getLockedTabId();
 		if (targetId != null) {
 			if (!tab || tabId !== targetId) return;
@@ -960,14 +1102,29 @@ export const reloadImagesWhenPageLoads = action(
 				isFolderCustomized.value = false;
 				pageUrl.value = tab?.url || changeInfo.url;
 				try {
-					hostname.value = new URL(tab.url).hostname;
+					hostname.value = new URL(pageUrl.value).hostname;
 				} catch (error) {
-					hostname.value = tab.url;
+					hostname.value = pageUrl.value;
 				}
 			}
 
 			if (changeInfo?.status === 'complete') {
+				if (progressiveTabScanTimer !== undefined) {
+					clearTimeout(progressiveTabScanTimer);
+					progressiveTabScanTimer = undefined;
+				}
 				loadImagesFromActiveTab({ waitForIdleDOM: false });
+			} else if (changeInfo?.status === 'loading' || changeInfo?.url) {
+				if (progressiveTabScanTimer !== undefined) {
+					clearTimeout(progressiveTabScanTimer);
+				}
+				progressiveTabScanTimer = setTimeout(() => {
+					progressiveTabScanTimer = undefined;
+					if (extractionScope.value === 'current_tab') {
+						loadImagesFromActiveTab({ waitForIdleDOM: 1 });
+					}
+				}, 200);
+				/** @type {any} */ (progressiveTabScanTimer)?.unref?.();
 			}
 		}
 	}
@@ -1046,7 +1203,7 @@ export const toggleAutoScroll = action(
 				});
 			}
 		} catch (error) {
-			console.warn('[ID-AutoScroll] ⚠️ Auto-scroll execution failed:', error);
+			console.warn('[ID-AutoScroll] Auto-scroll execution failed:', error);
 		} finally {
 			isAutoScrolling.value = false;
 			if (extractionScope.value === 'current_window') {

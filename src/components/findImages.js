@@ -12,43 +12,55 @@ export async function findImages(
 		window: /** @type {Window & typeof globalThis} */ (rest.window || window),
 	};
 
-	// Clean up any previously created observer and timeout from prior executions
+	// Settle and clean up any previously created observer and timers from prior executions
 	context.window.__observer?.disconnect();
 	clearTimeout(context.window.__idleDomTimer);
+	clearTimeout(context.window.__maxIdleDomTimer);
+	context.window.__resolveIdleDom?.();
+	context.window.__resolveIdleDom = undefined;
 
-	// Wait until the page is fully loaded
-	if (context.document.readyState !== 'complete') {
-		await new Promise((/** @type {(...args: any[]) => void} */ resolve) => {
-			context.window.addEventListener('load', resolve, { once: true });
-			// Fallback in case 'load' already fired or for SPAs
-			if (context.document.readyState === 'complete') resolve();
-		});
-	}
-
-	// Maybe wait until DOM is likely idle
+	// Maybe wait briefly until DOM settles, bounded by a strict ceiling so streaming/mutating pages never livelock
 	if (waitForIdleDOM !== false && waitForIdleDOM != null && waitForIdleDOM >= 0 && Number.isFinite(waitForIdleDOM)) {
-		await new Promise((/** @type {(...args: any[]) => void} */ resolve) => {
-			const observer = new context.window.MutationObserver(() => {
-				resetTimer(waitForIdleDOM);
-			});
-
-			observer.observe(context.document.documentElement, {
-				childList: true,
-				subtree: true,
-				attributes: false,
-			});
-
-			context.window.__observer = observer;
-			resetTimer(waitForIdleDOM);
-
-			function resetTimer(/** @type {number} */ waitForIdleDOM) {
-				clearTimeout(context.window.__idleDomTimer);
-				context.window.__idleDomTimer = setTimeout(() => {
+		const rootElement = context.document.documentElement;
+		const ObserverCtor = context.window.MutationObserver;
+		if (rootElement && typeof ObserverCtor === 'function') {
+			const maxWaitMs = Math.min(Math.max(waitForIdleDOM * 2.5, waitForIdleDOM), 2500);
+			await new Promise((/** @type {(...args: any[]) => void} */ resolve) => {
+				let settled = false;
+				const finish = () => {
+					if (settled) return;
+					settled = true;
 					observer.disconnect();
+					clearTimeout(context.window.__idleDomTimer);
+					clearTimeout(context.window.__maxIdleDomTimer);
+					if (context.window.__resolveIdleDom === finish) {
+						context.window.__resolveIdleDom = undefined;
+					}
 					resolve();
-				}, waitForIdleDOM);
-			}
-		});
+				};
+
+				const observer = new ObserverCtor(() => {
+					resetTimer(waitForIdleDOM);
+				});
+
+				observer.observe(rootElement, {
+					childList: true,
+					subtree: true,
+					attributes: true,
+					attributeFilter: ['src', 'srcset', 'data-src', 'data-srcset', 'style'],
+				});
+
+				context.window.__observer = observer;
+				context.window.__resolveIdleDom = finish;
+				context.window.__maxIdleDomTimer = setTimeout(finish, maxWaitMs);
+				resetTimer(waitForIdleDOM);
+
+				function resetTimer(/** @type {number} */ delayMs) {
+					clearTimeout(context.window.__idleDomTimer);
+					context.window.__idleDomTimer = setTimeout(finish, delayMs);
+				}
+			});
+		}
 	}
 
 	// Source: https://support.google.com/webmasters/answer/2598805?hl=en
@@ -112,8 +124,9 @@ export async function findImages(
 		if (element.tagName.toLowerCase() === 'img') {
 			const images = [];
 
-			// Extract src
-			const src = /** @type {HTMLImageElement}  */ (element).src;
+			// Extract src (skip empty src="" attribute placeholders that resolve to document.baseURI)
+			const rawSrcAttr = element.getAttribute?.('src');
+			const src = rawSrcAttr === '' ? '' : /** @type {HTMLImageElement} */ (element).src;
 			if (src) {
 				const hashIndex = src.indexOf('#');
 				images.push(hashIndex >= 0 ? src.slice(0, hashIndex) : src);

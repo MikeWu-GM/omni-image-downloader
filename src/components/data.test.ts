@@ -988,4 +988,236 @@ describe('currentSelectedImages', () => {
 			expect(stored.selected_images).toBeUndefined();
 		});
 	});
+
+	describe('incomplete page load resilience (Tab & Window modes)', () => {
+		it('hydrates extraction_scope, group_by_tab, and subfolder_per_tab from storage on initialize', async () => {
+			setupMocks({
+				extraction_scope: 'current_window',
+				group_by_tab: false,
+				subfolder_per_tab: false,
+			});
+			await initialize();
+
+			expect(extractionScope.value).toBe('current_window');
+			expect(groupByTab.value).toBe(false);
+			expect(subfolderPerTab.value).toBe(false);
+		});
+
+		it('passes injectImmediately: true and falls back to top frame (frameIds: [0]) when a loading subframe fails in Tab and Window modes', async () => {
+			const chrome = (global as any).chrome;
+			chrome.windows = { getCurrent: (cb: any) => cb({ id: 1 }) };
+			chrome.tabs = {
+				query: (_query: any, cb: any) =>
+					cb([{ id: 55, windowId: 1, active: true, status: 'loading', url: 'https://loading-site.example.com/' }]),
+			};
+
+			const calls: any[] = [];
+			chrome.scripting = {
+				executeScript: mock(async (injection: any) => {
+					calls.push(injection);
+					if (injection.target?.allFrames) {
+						throw new Error('Frame with ID 108 was removed');
+					}
+					return [
+						{
+							frameId: 0,
+							result: {
+								allImages: ['https://loading-site.example.com/hero.jpg'],
+								linkedImages: [],
+								imageDimensions: {},
+								title: 'Loading Site',
+							},
+						},
+					];
+				}),
+			};
+
+			// 1. Current Tab mode
+			loadImagesFromActiveTab({ waitForIdleDOM: 1 });
+			await new Promise((resolve) => setTimeout(resolve, 20));
+
+			expect(calls[0].injectImmediately).toBe(true);
+			expect(calls[0].target).toEqual({ tabId: 55, allFrames: true });
+			expect(calls[1].injectImmediately).toBe(true);
+			expect(calls[1].target).toEqual({ tabId: 55, frameIds: [0] });
+			expect(allImages.value).toEqual(['https://loading-site.example.com/hero.jpg']);
+
+			// 2. Current Window mode
+			allImages.value = [];
+			extractionScope.value = 'current_window';
+			await loadImagesFromCurrentWindow({ waitForIdleDOM: 1 });
+
+			expect(tabGroups.value).toHaveLength(1);
+			expect(tabGroups.value[0].status).toBe('loaded');
+			expect(allImages.value).toEqual(['https://loading-site.example.com/hero.jpg']);
+		});
+
+		it('streams ready tab images immediately in Window mode without waiting for stalled loading tabs', async () => {
+			const chrome = (global as any).chrome;
+			chrome.windows = { getCurrent: (cb: any) => cb({ id: 1 }) };
+			chrome.tabs = {
+				query: (_query: any, cb: any) =>
+					cb([
+						{ id: 1, windowId: 1, status: 'complete', title: 'Fast Tab', url: 'https://fast.example.com/' },
+						{ id: 2, windowId: 1, status: 'loading', title: 'Slow Tab', url: 'https://slow.example.com/' },
+					]),
+			};
+
+			let resolveSlowTab!: (val: any) => void;
+			const slowTabPromise = new Promise((resolve) => {
+				resolveSlowTab = resolve;
+			});
+
+			chrome.scripting = {
+				executeScript: mock((injection: any) => {
+					if (injection.target.tabId === 1) {
+						return Promise.resolve([
+							{
+								frameId: 0,
+								result: {
+									allImages: ['https://fast.example.com/ready.png'],
+									linkedImages: [],
+									imageDimensions: {},
+									title: 'Fast Tab',
+								},
+							},
+						]);
+					}
+					return slowTabPromise;
+				}),
+			};
+
+			extractionScope.value = 'current_window';
+			const fullWindowRun = loadImagesFromCurrentWindow({ waitForIdleDOM: 1 });
+
+			// Before Tab 2 settles, Tab 1 images must already be visible in tabGroups and allImages
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			expect(allImages.value).toEqual(['https://fast.example.com/ready.png']);
+			expect(tabGroups.value[0].status).toBe('loaded');
+			expect(tabGroups.value[1].status).toBe('loading');
+
+			// Now Tab 2 finishes
+			resolveSlowTab([
+				{
+					frameId: 0,
+					result: {
+						allImages: ['https://slow.example.com/late.webp'],
+						linkedImages: [],
+						imageDimensions: {},
+						title: 'Slow Tab',
+					},
+				},
+			]);
+			await fullWindowRun;
+
+			expect(allImages.value).toEqual(['https://fast.example.com/ready.png', 'https://slow.example.com/late.webp']);
+			expect(tabGroups.value[1].status).toBe('loaded');
+		});
+
+		it('progressively extracts during status=loading and refreshes Window scope when any tab in the window updates', async () => {
+			const chrome = (global as any).chrome;
+			window.location.search = '?tabId=42';
+			chrome.windows = { getCurrent: (cb: any) => cb({ id: 9 }) };
+			chrome.tabs = {
+				get: (id: number, cb: any) =>
+					cb({ id, windowId: 9, active: true, status: 'loading', url: 'https://tab42.example.com/' }),
+				query: (_query: any, cb: any) =>
+					cb([
+						{ id: 42, windowId: 9, status: 'complete', title: 'Tab 42', url: 'https://tab42.example.com/' },
+						{ id: 99, windowId: 9, status: 'loading', title: 'Tab 99', url: 'https://tab99.example.com/' },
+					]),
+			};
+			chrome.scripting = {
+				executeScript: mock(async (injection: any) => [
+					{
+						frameId: 0,
+						result: {
+							allImages: [`https://tab${injection.target.tabId}.example.com/img.jpg`],
+							linkedImages: [],
+							imageDimensions: {},
+							title: `Tab ${injection.target.tabId}`,
+						},
+					},
+				]),
+			};
+
+			// 1. Progressive extraction during status === 'loading' in Current Tab mode
+			extractionScope.value = 'current_tab';
+			reloadImagesWhenPageLoads(
+				42,
+				{ status: 'loading' },
+				{ id: 42, windowId: 9, active: true, url: 'https://tab42.example.com/' }
+			);
+			await new Promise((resolve) => setTimeout(resolve, 320));
+			expect(allImages.value).toEqual(['https://tab42.example.com/img.jpg']);
+
+			// 2. Non-locked tab update in Current Window mode refreshes full window instead of ignoring or clobbering
+			extractionScope.value = 'current_window';
+			reloadImagesWhenPageLoads(
+				99,
+				{ status: 'complete' },
+				{ id: 99, windowId: 9, active: false, url: 'https://tab99.example.com/' }
+			);
+			await new Promise((resolve) => setTimeout(resolve, 40));
+
+			expect(allImages.value).toEqual(['https://tab42.example.com/img.jpg', 'https://tab99.example.com/img.jpg']);
+
+			window.location.search = '';
+		});
+
+		it('preserves already-detected dimensions and extensions across follow-up idle DOM passes', async () => {
+			const chrome = (global as any).chrome;
+			chrome.windows = { getCurrent: (cb: any) => cb({ id: 1 }) };
+			chrome.tabs = {
+				query: (_query: any, cb: any) => cb([{ id: 7, url: 'https://cdn.example.com/' }]),
+			};
+
+			let pass = 0;
+			chrome.scripting = {
+				executeScript: mock(async () => {
+					pass += 1;
+					if (pass === 1) {
+						return [
+							{
+								frameId: 0,
+								result: {
+									allImages: ['https://cdn.example.com/raw_id_1'],
+									linkedImages: [],
+									imageDimensions: {},
+								},
+							},
+						];
+					}
+					return [
+						{
+							frameId: 0,
+							result: {
+								allImages: ['https://cdn.example.com/raw_id_1', 'https://cdn.example.com/raw_id_2'],
+								linkedImages: [],
+								imageDimensions: {},
+							},
+						},
+					];
+				}),
+			};
+
+			// Pass 1 discovers raw_id_1, then extension cache resolves its dimensions and webp format
+			loadImagesFromActiveTab({ waitForIdleDOM: 1 });
+			await new Promise((resolve) => setTimeout(resolve, 15));
+			imageLoaded('https://cdn.example.com/raw_id_1', 1600, 1200);
+			updateDetectedExtension('https://cdn.example.com/raw_id_1', 'webp');
+			selectedFormats.value = ['webp'];
+
+			// Pass 2 runs and returns raw_id_1 (still 0x0 in page DOM) + raw_id_2
+			loadImagesFromActiveTab({ waitForIdleDOM: 1 });
+			await new Promise((resolve) => setTimeout(resolve, 15));
+
+			expect(imageDimensions.value['https://cdn.example.com/raw_id_1']).toEqual({ width: 1600, height: 1200 });
+			expect(detectedImageExtensions.value['https://cdn.example.com/raw_id_1']).toBe('webp');
+			expect(selectedFormats.value).toEqual(['webp']);
+
+			selectedFormats.value = [];
+			detectedImageExtensions.value = {};
+		});
+	});
 });

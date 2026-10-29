@@ -1075,4 +1075,115 @@ describe('findImages', () => {
 
 		expect(result.allImages).toEqual(['https://example.com/valid-bg']);
 	});
+
+	it('discovers already-parsed DOM images immediately when document.readyState is loading or interactive without waiting for window load', async () => {
+		const img: MockElement = {
+			tagName: 'IMG',
+			src: 'https://example.com/early-visible.jpg',
+			naturalWidth: 0,
+			naturalHeight: 0,
+		};
+		const lazyImg: MockElement = {
+			tagName: 'IMG',
+			src: 'https://example.com/gallery',
+			getAttribute: (attr: string) => {
+				if (attr === 'src') return '';
+				if (attr === 'data-src') return 'https://example.com/lazy-pending.webp';
+				return null;
+			},
+		};
+
+		for (const readyState of ['loading', 'interactive'] as const) {
+			const mockDoc = {
+				baseURI: 'https://example.com/gallery',
+				readyState,
+				title: 'Loading Gallery',
+				querySelectorAll: (selector: string) => (selector.includes('img') ? [img, lazyImg] : []),
+			} as unknown as Document;
+
+			const mockWin = {
+				location: { origin: 'https://example.com' },
+				getComputedStyle: () => ({ backgroundImage: '' }),
+				// Deliberately never invoke 'load' listener to simulate stalled subresources
+				addEventListener: () => {},
+			} as unknown as Window;
+
+			const raceResult = await Promise.race([
+				findImages({ waitForIdleDOM: false, document: mockDoc, window: mockWin }),
+				new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 100)),
+			]);
+
+			expect(raceResult).not.toBe('timeout');
+			if (raceResult !== 'timeout') {
+				expect(raceResult.allImages).toEqual([
+					'https://example.com/early-visible.jpg',
+					'https://example.com/lazy-pending.webp',
+				]);
+			}
+		}
+	});
+
+	it('bounds waitForIdleDOM under continuous DOM mutations and tolerates null documentElement on early frames', async () => {
+		const img: MockElement = {
+			tagName: 'IMG',
+			src: 'https://example.com/streamed.png',
+		};
+
+		// Case 1: Early loading frame where documentElement is not created yet
+		const earlyDoc = {
+			baseURI: 'https://example.com/',
+			readyState: 'loading',
+			documentElement: null,
+			querySelectorAll: (selector: string) => (selector.includes('img') ? [img] : []),
+		} as unknown as Document;
+		const earlyWin = {
+			location: { origin: 'https://example.com' },
+			getComputedStyle: () => ({ backgroundImage: '' }),
+			addEventListener: () => {},
+		} as unknown as Window;
+
+		const earlyRes = await findImages({ waitForIdleDOM: 20, document: earlyDoc, window: earlyWin });
+		expect(earlyRes.allImages).toEqual(['https://example.com/streamed.png']);
+
+		// Case 2: Continuous DOM mutations must resolve within bounded max wait instead of starving forever
+		let mutationCallback: (() => void) | null = null;
+		let intervalId: ReturnType<typeof setInterval> | null = null;
+		class FakeMutationObserver {
+			constructor(cb: () => void) {
+				mutationCallback = cb;
+			}
+			observe() {
+				intervalId = setInterval(() => mutationCallback?.(), 5);
+			}
+			disconnect() {
+				if (intervalId) clearInterval(intervalId);
+			}
+		}
+
+		const mutatingDoc = {
+			baseURI: 'https://example.com/',
+			readyState: 'interactive',
+			documentElement: {},
+			querySelectorAll: (selector: string) => (selector.includes('img') ? [img] : []),
+		} as unknown as Document;
+		const mutatingWin = {
+			location: { origin: 'https://example.com' },
+			getComputedStyle: () => ({ backgroundImage: '' }),
+			addEventListener: () => {},
+			MutationObserver: FakeMutationObserver,
+		} as unknown as Window;
+
+		try {
+			const raced = await Promise.race([
+				findImages({ waitForIdleDOM: 30, document: mutatingDoc, window: mutatingWin }),
+				new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 250)),
+			]);
+			expect(raced).not.toBe('timeout');
+			if (raced !== 'timeout') {
+				expect(raced.allImages).toEqual(['https://example.com/streamed.png']);
+			}
+		} finally {
+			if (intervalId) clearInterval(intervalId);
+		}
+	});
 });
