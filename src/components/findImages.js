@@ -85,6 +85,7 @@ export async function findImages(
 				urls?.forEach((url) => {
 					if (url) {
 						const absUrl = relativeUrlToAbsolute(url);
+						if (!isAllowedExtractedUrl(absUrl)) return;
 						images.add(absUrl);
 
 						if (element.tagName.toLowerCase() === 'img') {
@@ -206,10 +207,26 @@ export async function findImages(
 			.filter((url) => url.length > 0);
 	}
 
+	const DISALLOWED_BG_EXTENSIONS =
+		/\.(?:exe|msi|msp|bat|cmd|com|scr|pif|ps1|psm1|vbs|vbe|js|jse|mjs|cjs|wsf|wsh|hta|cpl|jar|reg|lnk|dll|sys|html?|xhtml|shtml|swf|sh|dmg|pkg|apk)(?:[?#]|$)/i;
+
+	function isAllowedExtractedUrl(/** @type {string} */ candidateUrl) {
+		if (!candidateUrl) return false;
+		if (/^data:image\//i.test(candidateUrl)) return true;
+		if (/^blob:https?:\/\//i.test(candidateUrl)) return true;
+		try {
+			const parsed = new URL(candidateUrl);
+			return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+		} catch {
+			return false;
+		}
+	}
+
 	function isValidBackgroundImageURL(/** @type {string} */ url) {
+		if (DISALLOWED_BG_EXTENSIONS.test(url)) return false;
 		// Accept any URL that looks like it could be a background image
-		// (has a protocol or is protocol-relative or is a blob URL)
-		return /^https?:\/\//.test(url) || /^\/\//.test(url) || /^blob:/.test(url);
+		// (has an http(s) protocol, is protocol-relative, or is an http(s) blob URL)
+		return /^https?:\/\//.test(url) || /^\/\//.test(url) || /^blob:https?:\/\//i.test(url);
 	}
 
 	function extractURLsFromStyle(/** @type {string} */ style) {

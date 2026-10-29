@@ -14,7 +14,33 @@ export const isNotStrictEqual = (value1) => (value2) => value1 !== value2;
 export const isTruthy = (value) => !!value;
 
 /** @type {(value: string) => string} */
-export const removeSpecialCharacters = (value) => value.replace(/[<>:"|?*]/g, '');
+export const removeSpecialCharacters = (value) => value.replace(/[<>:"|?*\x00-\x1f\x7f]/g, '');
+
+const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+
+/** @type {(value: string) => string} */
+export const sanitizeFilenamePrefix = (value) => {
+	const cleaned = removeSpecialCharacters(String(value || ''))
+		.replace(/[\\/]+/g, '')
+		.replace(/^\.+/, '');
+	if (!cleaned || cleaned === '.' || cleaned === '..') return '';
+	return WINDOWS_RESERVED_NAME.test(cleaned) ? `_${cleaned}` : cleaned;
+};
+
+/** @type {(value: string) => string} */
+export const sanitizeSubfolderPath = (value) =>
+	removeSpecialCharacters(String(value || ''))
+		.replace(/\\/g, '/')
+		.split('/')
+		.map((segment) =>
+			segment
+				.trim()
+				.replace(/^\.+|\.+$/g, '')
+				.trim()
+		)
+		.filter((segment) => segment.length > 0 && segment !== '.' && segment !== '..')
+		.map((segment) => (WINDOWS_RESERVED_NAME.test(segment) ? `_${segment}` : segment))
+		.join('/');
 
 /** @type {(container: Element, src: string) => HTMLImageElement | undefined} */
 export const findImageBySrc = (container, src) =>

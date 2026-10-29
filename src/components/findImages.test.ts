@@ -1014,4 +1014,65 @@ describe('findImages', () => {
 			'http://example.com/icon.png': { width: 32, height: 32 },
 		});
 	});
+
+	it('rejects non-image data: URIs, javascript:, and file: URLs across attributes and links', async () => {
+		const img: MockElement = {
+			tagName: 'IMG',
+			src: 'data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==',
+			getAttribute: (attr: string) => {
+				if (attr === 'data-src') return 'javascript:alert(1)//.png';
+				if (attr === 'srcset') return 'file:///C:/secret.png 1x, https://example.com/safe.png 2x';
+				return null;
+			},
+		};
+		const link: MockElement = {
+			tagName: 'A',
+			href: 'javascript://comment%0aalert(1)//test.png',
+		};
+		const svgImage: MockElement = {
+			tagName: 'image',
+			getAttribute: (attr: string) => (attr === 'xlink:href' ? 'data:text/html,<h1>spoof</h1>' : null),
+		};
+
+		const mockDocument: MockDocument = {
+			querySelectorAll(selector: string) {
+				if (selector === 'a') return [link];
+				return [img, link, svgImage];
+			},
+		};
+		const mockWindow: MockWindow = {
+			location: { origin: 'https://example.com' },
+			getComputedStyle: () => ({ backgroundImage: '' }),
+		};
+
+		const result = await runFindImages(mockDocument, mockWindow);
+
+		expect(result.allImages).toEqual(['https://example.com/safe.png']);
+		expect(result.linkedImages).toEqual([]);
+	});
+
+	it('rejects executable and HTML documents disguised in CSS background-image', async () => {
+		const div1: MockElement = { tagName: 'DIV', id: 1 };
+		const div2: MockElement = { tagName: 'DIV', id: 2 };
+		const div3: MockElement = { tagName: 'DIV', id: 3 };
+		const mockDocument: MockDocument = {
+			querySelectorAll: (selector: string) => {
+				if (selector.includes('[style]') || selector.includes('[class]')) return [div1, div2, div3];
+				return [];
+			},
+		};
+		const computedStyles = new Map([
+			[div1, { backgroundImage: 'url("https://example.com/payload.exe")' }],
+			[div2, { backgroundImage: 'url("https://example.com/phish.html")' }],
+			[div3, { backgroundImage: 'url("https://example.com/valid-bg")' }],
+		]);
+		const mockWindow: MockWindow = {
+			location: { origin: 'https://example.com' },
+			getComputedStyle: (el: MockElement) => computedStyles.get(el) || { backgroundImage: '' },
+		};
+
+		const result = await runFindImages(mockDocument, mockWindow);
+
+		expect(result.allImages).toEqual(['https://example.com/valid-bg']);
+	});
 });

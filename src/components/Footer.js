@@ -1,7 +1,12 @@
 // @ts-check
 import html from '../html.js';
 
-import { removeSpecialCharacters, setToCheckboxValue, setToInvertedCheckboxValue } from '../utils.js';
+import {
+	sanitizeFilenamePrefix,
+	sanitizeSubfolderPath,
+	setToCheckboxValue,
+	setToInvertedCheckboxValue,
+} from '../utils.js';
 import { triggerDownload } from './actions.js';
 import { Checkbox } from './Checkbox.js';
 import {
@@ -43,7 +48,7 @@ export function Footer(/** @type {Object} */ props) {
 									value=${folderName}
 									onChange=${(/** @type {Event} */ e) => {
 										const input = /** @type HTMLInputElement */ (e.currentTarget);
-										const savedSelectionStart = removeSpecialCharacters(
+										const savedSelectionStart = sanitizeSubfolderPath(
 											input.value.slice(0, input.selectionStart || 0)
 										).length;
 
@@ -52,7 +57,7 @@ export function Footer(/** @type {Object} */ props) {
 										});
 
 										isFolderCustomized.value = true;
-										folderName.value = removeSpecialCharacters(input.value);
+										folderName.value = sanitizeSubfolderPath(input.value);
 									}}
 								/>
 
@@ -65,7 +70,7 @@ export function Footer(/** @type {Object} */ props) {
 									value=${newFileName}
 									onChange=${(/** @type {Event} */ e) => {
 										const input = /** @type HTMLInputElement */ (e.currentTarget);
-										const savedSelectionStart = removeSpecialCharacters(
+										const savedSelectionStart = sanitizeFilenamePrefix(
 											input.value.slice(0, input.selectionStart || 0)
 										).length;
 
@@ -73,7 +78,7 @@ export function Footer(/** @type {Object} */ props) {
 											input.selectionStart = input.selectionEnd = savedSelectionStart;
 										});
 
-										newFileName.value = removeSpecialCharacters(input.value);
+										newFileName.value = sanitizeFilenamePrefix(input.value);
 									}}
 								/>
 							</div>

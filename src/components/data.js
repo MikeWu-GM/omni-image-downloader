@@ -62,13 +62,16 @@ export const defaults = {
 /** @template {keyof Options} K */
 function storedSignal(
 	/** @type {K} */ key,
-	/** @type {((val: Options[K]) => Options[K]) | undefined} */ serialize = undefined
+	/** @type {((val: Options[K]) => Options[K]) | undefined} */ serialize = undefined,
+	/** @type {(() => boolean) | undefined} */ shouldSkipPersist = undefined
 ) {
 	const ss = signal(defaults[key]);
 
 	effect(() => {
+		const currentValue = ss.value;
 		if (initialized.value) {
-			const valueToStore = serialize ? serialize(ss.value) : ss.value;
+			if (shouldSkipPersist?.()) return;
+			const valueToStore = serialize ? serialize(currentValue) : currentValue;
 			chrome.storage.local.set({ [key]: valueToStore })?.catch?.(() => {});
 		}
 	});
@@ -77,6 +80,7 @@ function storedSignal(
 }
 
 export const initialized = signal(false);
+export const isIncognitoContext = signal(false);
 
 // UI
 export const openMode = storedSignal('open_mode');
@@ -189,8 +193,10 @@ export const downloadConfirmationIsShown = signal(false);
 
 // Images
 /** @type {import('@preact/signals').Signal<string[]>} */
-export const selectedImages = storedSignal('selected_images', (urls) =>
-	urls.filter((url) => !url.startsWith('data:') && !url.startsWith('blob:'))
+export const selectedImages = storedSignal(
+	'selected_images',
+	(urls) => urls.filter((url) => !url.startsWith('data:') && !url.startsWith('blob:')),
+	() => isIncognitoContext.value || Boolean(/** @type {any} */ (chrome)?.extension?.inIncognitoContext)
 );
 
 export const columns = storedSignal('columns');
@@ -534,9 +540,10 @@ export const scriptError = signal('');
 const browserPageUrl = /^(about|chrome|chrome-extension|edge|moz-extension|view-source):/;
 
 function executeOnTab(
-	/** @type {chrome.tabs.Tab | { id: number, url?: string, title?: string }} */ activeTab,
+	/** @type {chrome.tabs.Tab | { id: number, url?: string, title?: string, incognito?: boolean }} */ activeTab,
 	/** @type {number | false} */ waitForIdleDOM
 ) {
+	isIncognitoContext.value = Boolean(activeTab.incognito);
 	if (activeTab.url) {
 		pageUrl.value = activeTab.url;
 		try {
@@ -691,12 +698,15 @@ async function withBlobUrlsRead(/** @type {number} */ tabId, /** @type {Message}
 			args: [blobUrls],
 		})
 		.catch(() => []);
-	/** @type {string[]} */
-	const dataUrls = injection?.result || [];
+	/** @type {unknown[]} */
+	const dataUrls = Array.isArray(injection?.result) ? injection.result : [];
 
-	// The page's world can return anything, so keep only image `data:` URLs
+	// The page's world can return anything, so keep only string image `data:` URLs
 	const dataUrlsByBlobUrl = new Map(
-		blobUrls.map((url, index) => [url, dataUrls[index]?.startsWith('data:image/') ? dataUrls[index] : url])
+		blobUrls.map((url, index) => {
+			const candidate = dataUrls[index];
+			return [url, typeof candidate === 'string' && candidate.startsWith('data:image/') ? candidate : url];
+		})
 	);
 	const read = (/** @type {string} */ url) => dataUrlsByBlobUrl.get(url) ?? url;
 	return {
@@ -764,6 +774,7 @@ export const loadImagesFromCurrentWindow = action(
 					);
 
 					const validTabs = tabs.filter((t) => t.id != null && (!t.url || !browserPageUrl.test(t.url)));
+					isIncognitoContext.value = validTabs.some((t) => Boolean(t.incognito));
 					console.info(`[ID-Window] 🎯 Usable web tabs after system filtering: ${validTabs.length}`);
 
 					if (validTabs.length === 0) {

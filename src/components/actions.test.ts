@@ -27,6 +27,23 @@ describe('openImage', () => {
 		const blob = await (await fetch(url)).blob();
 		expect([blob.type, await blob.text()]).toEqual(['image/webp', 'webp bytes']);
 	});
+
+	it('refuses active document data: URLs (text/html and image/svg+xml) to preserve extension origin isolation', async () => {
+		const { openImage } = await import('./actions.js');
+		await openImage('data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==');
+		await openImage('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+
+		expect(chrome.tabs.create).not.toHaveBeenCalled();
+	});
+
+	it('refuses non-http(s) URL schemes such as javascript:, file:, and chrome:', async () => {
+		const { openImage } = await import('./actions.js');
+		await openImage('javascript:alert(1)');
+		await openImage('file:///C:/Windows/win.ini');
+		await openImage('chrome://settings');
+
+		expect(chrome.tabs.create).not.toHaveBeenCalled();
+	});
 });
 
 describe('downloadImages', () => {

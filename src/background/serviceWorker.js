@@ -163,16 +163,176 @@ function removeFilenameListenerIfIdle() {
 // NOTE: Don't directly use an `async` function as a listener for `onMessage`:
 // https://stackoverflow.com/a/56483156
 // https://developer.chrome.com/docs/extensions/reference/runtime/#event-onMessage
+function isTrustedExtensionSender(/** @type {chrome.runtime.MessageSender} */ sender) {
+	if (!sender || !chrome.runtime?.id || sender.id !== chrome.runtime.id) {
+		return false;
+	}
+	const baseUrl = chrome.runtime.getURL ? chrome.runtime.getURL('') : '';
+	if (!baseUrl || typeof sender.url !== 'string' || !sender.url.startsWith(baseUrl)) {
+		return false;
+	}
+	return true;
+}
+
+function isAllowedDownloadUrl(/** @type {unknown} */ url) {
+	if (typeof url !== 'string' || !url) return false;
+	if (/^data:image\//i.test(url)) return true;
+	if (/^blob:/i.test(url)) return true;
+	try {
+		const parsed = new URL(url);
+		return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+	} catch {
+		return false;
+	}
+}
+
+const SAFE_IMAGE_EXTENSIONS = new Set([
+	'jpg',
+	'jpeg',
+	'png',
+	'gif',
+	'webp',
+	'avif',
+	'svg',
+	'bmp',
+	'ico',
+	'tif',
+	'tiff',
+	'jfif',
+	'apng',
+	'cur',
+]);
+
+const DANGEROUS_EXTENSIONS = new Set([
+	'exe',
+	'msi',
+	'msp',
+	'bat',
+	'cmd',
+	'com',
+	'scr',
+	'pif',
+	'ps1',
+	'psm1',
+	'vbs',
+	'vbe',
+	'js',
+	'jse',
+	'mjs',
+	'cjs',
+	'wsf',
+	'wsh',
+	'hta',
+	'cpl',
+	'msc',
+	'jar',
+	'reg',
+	'lnk',
+	'url',
+	'scf',
+	'inf',
+	'dll',
+	'sys',
+	'drv',
+	'ocx',
+	'html',
+	'htm',
+	'xhtml',
+	'shtml',
+	'svgz',
+	'swf',
+	'sh',
+	'bash',
+	'zsh',
+	'command',
+	'app',
+	'dmg',
+	'pkg',
+	'deb',
+	'rpm',
+	'apk',
+]);
+
+/** @type {Record<string, string>} */
+const MIME_TO_EXTENSION = {
+	'image/jpeg': 'jpg',
+	'image/jpg': 'jpg',
+	'image/png': 'png',
+	'image/gif': 'gif',
+	'image/webp': 'webp',
+	'image/avif': 'avif',
+	'image/svg+xml': 'svg',
+	'image/bmp': 'bmp',
+	'image/tiff': 'tif',
+	'image/x-icon': 'ico',
+	'image/vnd.microsoft.icon': 'ico',
+	'image/apng': 'apng',
+};
+
+const WINDOWS_RESERVED_SEGMENT = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+
+function safeDecodeUrlPath(/** @type {string} */ value) {
+	let current = value;
+	for (let pass = 0; pass < 2; pass++) {
+		if (!/%[0-9a-fA-F]{2}/.test(current)) break;
+		try {
+			const decoded = decodeURIComponent(current);
+			if (decoded === current) break;
+			current = decoded;
+		} catch {
+			break;
+		}
+	}
+	return current;
+}
+
+function sanitizePathSegment(/** @type {unknown} */ raw) {
+	if (typeof raw !== 'string') return '';
+	const cleaned = raw
+		.replace(/[<>:"/\\|?*\x00-\x1f\x7f]/g, '')
+		.trim()
+		.replace(/^\.+|\.+$/g, '')
+		.trim();
+	if (!cleaned || cleaned === '.' || cleaned === '..') return '';
+	return WINDOWS_RESERVED_SEGMENT.test(cleaned) ? `_${cleaned}` : cleaned;
+}
+
+function sanitizeRelativeFolder(/** @type {unknown} */ rawFolder) {
+	if (typeof rawFolder !== 'string' || !rawFolder) return '';
+	return rawFolder
+		.replace(/\\/g, '/')
+		.split('/')
+		.map((seg) => sanitizePathSegment(seg))
+		.filter(Boolean)
+		.join('/');
+}
+
+function resolveMimeImageExtension(/** @type {string | undefined} */ mime) {
+	if (!mime) return '';
+	const cleanMime = mime.split(';')[0].trim().toLowerCase();
+	if (MIME_TO_EXTENSION[cleanMime]) return MIME_TO_EXTENSION[cleanMime];
+	if (cleanMime.startsWith('image/')) {
+		const sub = cleanMime
+			.slice('image/'.length)
+			.split('+')[0]
+			.replace(/[^a-z0-9]/g, '');
+		if (SAFE_IMAGE_EXTENSIONS.has(sub)) return sub;
+	}
+	return '';
+}
+
 function startDownload(
 	/** @type {any} */ message,
 	/** @type {chrome.runtime.MessageSender} */ sender,
 	/** @type {(response?: any) => void} */ resolve
 ) {
 	if (!(message && message.type === 'downloadImages')) return;
+	if (!isTrustedExtensionSender(sender)) return;
+	if (!Array.isArray(message.imagesToDownload)) return;
 
 	downloadImages({
-		imagesToDownload: message.imagesToDownload,
-		options: message.options,
+		imagesToDownload: message.imagesToDownload.filter(isAllowedDownloadUrl),
+		options: message.options || {},
 		indices: new Map(),
 	}).then(resolve);
 
@@ -209,8 +369,20 @@ async function downloadImages(/** @type {Task} */ task) {
 			)
 		);
 
-		if (task.options?.source_url_file) {
-			const { url, filename } = task.options.source_url_file;
+		if (
+			task.options?.source_url_file &&
+			typeof task.options.source_url_file.url === 'string' &&
+			task.options.source_url_file.url.startsWith('data:text/html;charset=utf-8,')
+		) {
+			const url = task.options.source_url_file.url;
+			const rawSourceFolder = String(task.options.source_url_file.filename || '')
+				.replace(/\\/g, '/')
+				.split('/')
+				.slice(0, -1)
+				.join('/');
+			const safeSourceFolder = sanitizeRelativeFolder(rawSourceFolder);
+			const safeSourceFilename = safeSourceFolder ? `${safeSourceFolder}/source.html` : 'source.html';
+
 			promises.push(
 				runWithDownloadSlot(
 					() =>
@@ -218,17 +390,17 @@ async function downloadImages(/** @type {Task} */ task) {
 							/** @type {chrome.downloads.DownloadOptions} */
 							const downloadOptions = canSuggestFilename()
 								? { url }
-								: { url, filename: normalizeSlashes(filename), conflictAction: 'uniquify' };
+								: { url, filename: safeSourceFilename, conflictAction: 'uniquify' };
 							chrome.downloads.download(downloadOptions, (downloadId) => {
 								if (downloadId != null) {
 									inFlightDownloadIds.add(downloadId);
 									task.sourceDownloadId = downloadId;
-									task.sourceFilename = normalizeSlashes(filename);
+									task.sourceFilename = safeSourceFilename;
 									tasksByDownloadId.set(downloadId, task);
 								} else {
 									releaseDownloadSlot();
 									if (chrome.runtime.lastError) {
-										console.warn(`${filename}:`, chrome.runtime.lastError.message);
+										console.warn(`${safeSourceFilename}:`, chrome.runtime.lastError.message);
 									}
 								}
 								resolve();
@@ -288,12 +460,23 @@ function suggestNewFilename(item, suggest) {
 
 /** @returns {chrome.downloads.DownloadOptions} */
 function withFilename(/** @type {Task} */ task, /** @type {number} */ index, /** @type {string} */ url) {
-	const hasSubfolder = Boolean(task.options?.subfolders?.[index]);
-	if (!task.options.folder_name && !task.options.new_file_name && !hasSubfolder) return { url };
+	const safeFolder = sanitizeRelativeFolder(task.options?.folder_name);
+	const safeSubfolder = sanitizeRelativeFolder(task.options?.subfolders?.[index]);
+	const safeNewName = sanitizePathSegment(task.options?.new_file_name);
+	if (!safeFolder && !safeNewName && !safeSubfolder) return { url };
 
 	// A `data:` URL's path is its payload, not a filename.
 	const isDataUrl = url.startsWith('data:');
-	const urlFilename = isDataUrl ? '' : decodeURIComponent(new URL(url).pathname.split('/').pop() || '');
+	const isBlobUrl = url.startsWith('blob:');
+	let urlFilename = '';
+	if (!isDataUrl && !isBlobUrl) {
+		try {
+			const decodedPathname = safeDecodeUrlPath(new URL(url).pathname);
+			urlFilename = sanitizePathSegment(decodedPathname.replace(/\\/g, '/').split('/').pop() || '');
+		} catch {
+			urlFilename = '';
+		}
+	}
 	const mime = isDataUrl ? url.slice('data:'.length).split(/[;,]/)[0] : undefined;
 	return {
 		url,
@@ -309,25 +492,44 @@ function buildFilename(
 	/** @type {string | undefined} */ mime = undefined
 ) {
 	let newFilename = '';
-	if (task.options.folder_name) {
-		newFilename += `${task.options.folder_name}/`;
+	const safeFolder = sanitizeRelativeFolder(task.options?.folder_name);
+	if (safeFolder) {
+		newFilename += `${safeFolder}/`;
 	}
 
-	const subfolder = task.options?.subfolders?.[index];
-	if (subfolder) {
-		newFilename += `${subfolder}/`;
+	const safeSubfolder = sanitizeRelativeFolder(task.options?.subfolders?.[index]);
+	if (safeSubfolder) {
+		newFilename += `${safeSubfolder}/`;
 	}
 
-	const regex = /(?:\.([^.]+))?$/;
-	const extension = regex.exec(originalFilename)?.[1] || mime?.split('/')?.[1]?.replace('jpeg', 'jpg');
+	const rawBase =
+		safeDecodeUrlPath(String(originalFilename || ''))
+			.replace(/\\/g, '/')
+			.split('/')
+			.pop() || '';
+	const cleanOriginal = sanitizePathSegment(rawBase);
 
-	if (task.options.new_file_name) {
+	const extMatch = /^(.*?)(?:\.([^.]+))?$/.exec(cleanOriginal);
+	const baseWithoutExt = extMatch?.[1] || '';
+	const rawFileExt = extMatch?.[2]?.toLowerCase() || '';
+	const mimeExt = resolveMimeImageExtension(mime);
+	const isDangerousExt = Boolean(rawFileExt && DANGEROUS_EXTENSIONS.has(rawFileExt));
+	const safeExt = isDangerousExt ? mimeExt || 'bin' : rawFileExt || mimeExt;
+
+	const safeNewFileName = sanitizePathSegment(task.options?.new_file_name);
+	if (safeNewFileName) {
 		const numberOfDigits = task.imagesToDownload.length.toString().length;
 		const formattedImageNumber = `${index + 1}`.padStart(numberOfDigits, '0');
 
-		newFilename += `${task.options.new_file_name}${formattedImageNumber}${extension ? `.${extension}` : ''}`;
+		newFilename += `${safeNewFileName}${formattedImageNumber}${safeExt ? `.${safeExt}` : ''}`;
+	} else if (cleanOriginal) {
+		if (isDangerousExt) {
+			newFilename += `${baseWithoutExt || 'image'}.${safeExt}`;
+		} else {
+			newFilename += cleanOriginal;
+		}
 	} else {
-		newFilename += originalFilename || `image${extension ? `.${extension}` : ''}`;
+		newFilename += `image${safeExt ? `.${safeExt}` : ''}`;
 	}
 
 	return normalizeSlashes(newFilename);

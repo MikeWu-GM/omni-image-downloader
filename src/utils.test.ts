@@ -99,3 +99,45 @@ describe('measurePerf & getPerfReport', () => {
 		expect(report['test:async'].count).toBe(1);
 	});
 });
+
+describe('dev web server & manifest CSP security boundaries', () => {
+	it('declares explicit MV3 extension_pages CSP in manifest.json', async () => {
+		const manifest = await import('../manifest.json');
+		expect((manifest as any).content_security_policy?.extension_pages).toBe(
+			"script-src 'self'; object-src 'none'; base-uri 'none';"
+		);
+	});
+
+	it('blocks non-loopback Host headers and hidden repository files in scripts/web.ts', async () => {
+		const webMod = await import('../scripts/web');
+		expect(typeof webMod.handleWebRequest).toBe('function');
+
+		const rebindRes = await webMod.handleWebRequest(
+			new Request('http://127.0.0.1:3000/src/Web/index.html', {
+				headers: { host: 'evil-rebind.attacker.example:3000' },
+			})
+		);
+		expect(rebindRes.status).toBe(403);
+
+		const gitConfigRes = await (webMod as any).handleWebRequest(
+			new Request('http://127.0.0.1:3000/.git/config', {
+				headers: { host: '127.0.0.1:3000' },
+			})
+		);
+		expect(gitConfigRes.status).toBe(403);
+
+		const pkgJsonRes = await (webMod as any).handleWebRequest(
+			new Request('http://127.0.0.1:3000/package.json', {
+				headers: { host: '127.0.0.1:3000' },
+			})
+		);
+		expect(pkgJsonRes.status).toBe(403);
+
+		const okRes = await (webMod as any).handleWebRequest(
+			new Request('http://127.0.0.1:3000/', {
+				headers: { host: '127.0.0.1:3000' },
+			})
+		);
+		expect(okRes.status).toBe(200);
+	});
+});

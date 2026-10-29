@@ -1,5 +1,5 @@
 // @ts-check
-import { generateSourceHtml } from '../utils.js';
+import { generateSourceHtml, sanitizeSubfolderPath } from '../utils.js';
 import {
 	currentSelectedImages,
 	downloadConfirmationIsShown,
@@ -35,12 +35,13 @@ export const maybeDownloadImages = () => {
 
 export const downloadImages = (/** @type {string[]} */ imagesToDownload) =>
 	new Promise((resolve) => {
+		const safeFolder = sanitizeSubfolderPath(folderName.value);
 		const sourceUrlFile =
 			saveSourceUrl.value && pageUrl.value
 				? {
 						url:
 							'data:text/html;charset=utf-8,' + encodeURIComponent(generateSourceHtml(pageUrl.value, pageTitle.value)),
-						filename: (folderName.value ? `${folderName.value}/` : '') + 'source.html',
+						filename: (safeFolder ? `${safeFolder}/` : '') + 'source.html',
 					}
 				: null;
 
@@ -77,8 +78,55 @@ export const downloadImages = (/** @type {string[]} */ imagesToDownload) =>
 		);
 	});
 
+const SAFE_RASTER_DATA_MIMES = new Set([
+	'image/png',
+	'image/jpeg',
+	'image/jpg',
+	'image/gif',
+	'image/webp',
+	'image/avif',
+	'image/bmp',
+	'image/x-icon',
+	'image/vnd.microsoft.icon',
+	'image/tiff',
+	'image/apng',
+]);
+
 export const openImage = async (/** @type {string} */ url) => {
-	// Browsers refuse to open `data:` URLs in a tab, but open a blob from the extension's own origin
-	const tabUrl = url.startsWith('data:') ? URL.createObjectURL(await (await fetch(url)).blob()) : url;
-	await chrome.tabs.create({ url: tabUrl, active: false });
+	if (!url || typeof url !== 'string') return;
+
+	// Browsers refuse to open `data:` URLs in a tab; re-host only passive raster image MIME types
+	// as temporary object URLs so active HTML/SVG payloads never execute under the extension origin.
+	if (url.startsWith('data:')) {
+		const headerMatch = url.match(/^data:([^;,]+)[;,]/i);
+		const declaredMime = headerMatch ? headerMatch[1].trim().toLowerCase() : '';
+		if (!SAFE_RASTER_DATA_MIMES.has(declaredMime)) {
+			return;
+		}
+		const fetchedBlob = await (await fetch(url)).blob();
+		const actualMime = (fetchedBlob.type || declaredMime).split(';')[0].trim().toLowerCase();
+		if (!SAFE_RASTER_DATA_MIMES.has(actualMime)) {
+			return;
+		}
+		const safeBlob = new Blob([await fetchedBlob.arrayBuffer()], { type: actualMime });
+		const tabUrl = URL.createObjectURL(safeBlob);
+		try {
+			await chrome.tabs.create({ url: tabUrl, active: false });
+		} finally {
+			const revokeTimer = setTimeout(() => URL.revokeObjectURL(tabUrl), 60_000);
+			/** @type {any} */ (revokeTimer)?.unref?.();
+		}
+		return;
+	}
+
+	let parsed;
+	try {
+		parsed = new URL(url);
+	} catch {
+		return;
+	}
+	if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+		return;
+	}
+	await chrome.tabs.create({ url: parsed.href, active: false });
 };

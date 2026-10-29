@@ -31,10 +31,18 @@ beforeEach(async () => {
 	await import(`${serviceWorkerPath}?${serviceWorkerInstance}`);
 });
 
-function startBatch(images: string[], options: any = {}) {
+function trustedSender() {
+	return {
+		id: chrome.runtime.id,
+		url: chrome.runtime.getURL('src/Popup/index.html'),
+	};
+}
+
+function startBatch(images: string[], options: any = {}, sender: any = trustedSender()) {
 	const startDownload = chrome.runtime.onMessage.addListener.mock.calls[0][0];
 	return new Promise<void>((resolve) => {
-		startDownload({ type: 'downloadImages', imagesToDownload: images, options }, {}, resolve);
+		const handled = startDownload({ type: 'downloadImages', imagesToDownload: images, options }, sender, resolve);
+		if (!handled) resolve();
 	});
 }
 
@@ -416,5 +424,78 @@ describe('serviceWorker open_mode dynamic updates and installation', () => {
 		await storageListener({ open_mode: { newValue: 'popup' } }, 'sync');
 
 		expect(chrome.action.setPopup).not.toHaveBeenCalled();
+	});
+});
+
+describe('serviceWorker security boundaries', () => {
+	it('rejects downloadImages messages from untrusted senders (content scripts or foreign extensions)', async () => {
+		await startBatch(['https://example.com/1.jpg'], {}, {});
+		await startBatch(
+			['https://example.com/1.jpg'],
+			{},
+			{ id: 'foreign-ext', url: 'chrome-extension://foreign-ext/p.html' }
+		);
+		await startBatch(
+			['https://example.com/1.jpg'],
+			{},
+			{ id: chrome.runtime.id, url: 'https://evil.example/page.html', tab: { id: 9 } }
+		);
+
+		expect(chrome.downloads.download).not.toHaveBeenCalled();
+	});
+
+	it('blocks unsafe download URL schemes and untrusted external source_url_file payloads', async () => {
+		await startBatch(
+			['javascript:alert(1)', 'file:///C:/Windows/win.ini', 'data:text/html,<h1>x</h1>', 'https://example.com/ok.png'],
+			{
+				source_url_file: {
+					url: 'https://evil.example/dropper.exe',
+					filename: '../../dropper.exe',
+				},
+			}
+		);
+
+		expect(chrome.downloads.download).toHaveBeenCalledTimes(1);
+		expect(chrome.downloads.download.mock.calls[0][0]).toEqual({ url: 'https://example.com/ok.png' });
+	});
+
+	it('neutralizes traversal segments, normalizes svg+xml MIME, and disarms executable extensions', async () => {
+		const done = startBatch(['https://example.com/1', 'https://example.com/2', 'https://example.com/3'], {
+			folder_name: '../../escaped_root',
+			subfolders: ['../escaped_sub', 'clean_sub', '..'],
+		});
+		const [id1, id2, id3] = downloadIds.slice(-3);
+
+		const suggest1 = mock();
+		filenameListener()({ id: id1, filename: '../../payload.exe' }, suggest1);
+		expect(suggest1.mock.calls).toEqual([
+			[{ filename: 'escaped_root/escaped_sub/payload.bin', conflictAction: 'uniquify' }],
+		]);
+
+		const suggest2 = mock();
+		filenameListener()({ id: id2, filename: '', mime: 'image/svg+xml' } as any, suggest2);
+		expect(suggest2.mock.calls).toEqual([
+			[{ filename: 'escaped_root/clean_sub/image.svg', conflictAction: 'uniquify' }],
+		]);
+
+		const suggest3 = mock();
+		filenameListener()({ id: id3, filename: 'phish.html', mime: 'text/html' } as any, suggest3);
+		expect(suggest3.mock.calls).toEqual([[{ filename: 'escaped_root/phish.bin', conflictAction: 'uniquify' }]]);
+
+		await done;
+	});
+
+	it('prevents URL-encoded path traversal (%2F / %5C) in Firefox mode without onDeterminingFilename', async () => {
+		chrome.downloads.onDeterminingFilename = undefined;
+
+		await startBatch(['https://example.com/assets/..%2F..%2F..%5Cphoto.png'], {
+			folder_name: 'safe_album',
+		});
+
+		expect(chrome.downloads.download.mock.calls.at(-1)[0]).toEqual({
+			url: 'https://example.com/assets/..%2F..%2F..%5Cphoto.png',
+			filename: 'safe_album/photo.png',
+			conflictAction: 'uniquify',
+		});
 	});
 });

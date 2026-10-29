@@ -61,6 +61,20 @@ describe('Footer component', () => {
 		expect(newFileName.value).toBe('photo');
 	});
 
+	it('strips path traversal segments from subfolder input and slashes from rename input', () => {
+		render(html`<${Footer} />`, container);
+
+		const subfolderInput = container.querySelector('#subfolder_name_input') as HTMLInputElement;
+		subfolderInput.value = '../../nested/safe_sub/..';
+		subfolderInput.dispatchEvent(new (window as any).Event('change'));
+		expect(folderName.value).toBe('nested/safe_sub');
+
+		const renameInput = container.querySelector('#rename_pattern_input') as HTMLInputElement;
+		renameInput.value = '../evil\\prefix/pic';
+		renameInput.dispatchEvent(new (window as any).Event('change'));
+		expect(newFileName.value).toBe('evilprefixpic');
+	});
+
 	it('renders DownloadConfirmation when downloadConfirmationIsShown is true and closes on Cancel', () => {
 		downloadConfirmationIsShown.value = true;
 		render(html`<${Footer} />`, container);

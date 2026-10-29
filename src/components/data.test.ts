@@ -58,6 +58,7 @@ import {
 	imageToTabMap,
 	detectedImageExtensions,
 	updateDetectedExtension,
+	isIncognitoContext,
 } from './data.js';
 
 let localStorageData: Record<string, string>;
@@ -93,6 +94,7 @@ function setupMocks(initialStorage?: Record<string, any>) {
 
 beforeEach(() => {
 	setLockedTabId(null);
+	isIncognitoContext.value = false;
 	openMode.value = 'sidebar';
 	filterUrl.value = '';
 	filterUrlMode.value = 'normal';
@@ -937,6 +939,53 @@ describe('currentSelectedImages', () => {
 			await scrollPromise;
 			expect(isAutoScrolling.value).toBe(false);
 			expect(executeScriptMock).toHaveBeenCalled();
+		});
+	});
+
+	describe('security & privacy boundaries', () => {
+		it('ignores non-string payloads returned from MAIN world in withBlobUrlsRead without throwing', async () => {
+			const chrome = (global as any).chrome;
+			chrome.windows.getCurrent = (callback: any) => callback({ id: 1 });
+			chrome.tabs.query = (_query: any, callback: any) => callback([{ id: 7, url: 'https://example.com/' }]);
+			const blobUrl = 'blob:https://example.com/blob-1';
+			chrome.scripting = {
+				executeScript: mock(async (injection: any) =>
+					injection.world === 'MAIN'
+						? [{ frameId: 0, result: [12345, { bad: true }] }]
+						: [{ frameId: 0, result: { allImages: [blobUrl], linkedImages: [] } }]
+				),
+			};
+
+			loadImagesFromActiveTab({ waitForIdleDOM: 1 });
+			await new Promise((resolve) => setTimeout(resolve, 10));
+
+			expect(allImages.value).toEqual([blobUrl]);
+		});
+
+		it('does not persist selected_images to chrome.storage.local when active tab is incognito', async () => {
+			await initialize();
+			const chrome = (global as any).chrome;
+			chrome.windows.getCurrent = (callback: any) => callback({ id: 1 });
+			chrome.tabs.query = (_query: any, callback: any) =>
+				callback([{ id: 77, url: 'https://private.example.com/', incognito: true }]);
+			chrome.scripting = {
+				executeScript: mock(async () => [
+					{
+						frameId: 0,
+						result: { allImages: ['https://private.example.com/secret.jpg?token=abc'], linkedImages: [] },
+					},
+				]),
+			};
+
+			loadImagesFromActiveTab({ waitForIdleDOM: 1 });
+			await new Promise((resolve) => setTimeout(resolve, 10));
+
+			selectedImages.value = ['https://private.example.com/secret.jpg?token=abc'];
+			await new Promise((resolve) => setTimeout(resolve, 10));
+
+			expect(selectedImages.value).toEqual(['https://private.example.com/secret.jpg?token=abc']);
+			const stored = await chrome.storage.local.get(['selected_images']);
+			expect(stored.selected_images).toBeUndefined();
 		});
 	});
 });

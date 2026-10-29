@@ -35,6 +35,9 @@ export const mockChrome = (opts?: { storage?: Record<string, any> }) => {
 			onDeterminingFilename: createChromeEvent(),
 		},
 		runtime: {
+			id: 'omni-image-downloader-test',
+			getURL: (path: string) =>
+				`chrome-extension://omni-image-downloader-test/${String(path || '').replace(/^\//, '')}`,
 			getManifest: () => manifest,
 			onInstalled: createChromeEvent(),
 			onMessage: createChromeEvent(),
